@@ -27,6 +27,7 @@ import com.example.db.LocalStorageSummary
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -48,6 +49,17 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import retrofit2.Response
 import java.util.concurrent.Executor
+
+/** Builds a genuine non-success HTTP 304 response for Retrofit's response wrapper. */
+@Suppress("UNCHECKED_CAST")
+private fun <T> notModifiedResponse(headers: Headers = Headers.headersOf()): Response<T> {
+    val raw = okhttp3.Response.Builder()
+        .request(okhttp3.Request.Builder().url("https://example.test/files").build())
+        .protocol(okhttp3.Protocol.HTTP_1_1).code(304).message("Not Modified").headers(headers).build()
+    val ctor = Response::class.java.getDeclaredConstructor(okhttp3.Response::class.java, Any::class.java, ResponseBody::class.java)
+    ctor.isAccessible = true
+    return ctor.newInstance(raw, null, null) as Response<T>
+}
 
 class FakeCloudyteApi : CloudyteApi {
     var getFilesHandler: suspend (
@@ -263,6 +275,63 @@ class CloudFileRepositoryTest {
         assertEquals(setOf("f1", "f3", "f4"), finalIds)
 
         collectJob.cancel()
+    }
+
+    @Test
+    fun refresh_skipsFreshFolderAndForceUsesPersistedEtagFor304() = runTest {
+        var now = 1_000_000L
+        repository = CloudFileRepository(db, fakeApi) { now }
+        var calls = 0
+        val seenEtags = mutableListOf<String?>()
+        val file = CloudFile(id = "cached-file", name = "Cached.pdf", type = "file")
+        fakeApi.getFilesHandler = { _, _, _, _, _, etag ->
+            calls++; seenEtags += etag
+            if (etag == "\"v1\"") notModifiedResponse(Headers.headersOf("ETag", "\"v1\""))
+            else Response.success(listOf(file), Headers.headersOf("ETag", "\"v1\""))
+        }
+        assertTrue(repository.refresh("acc1", "root").isSuccess)
+        assertEquals(1, calls)
+        repository = CloudFileRepository(db, fakeApi) { now }
+        assertTrue(repository.refresh("acc1", "root").isSuccess)
+        assertEquals(1, calls)
+        assertTrue(repository.refresh("acc1", "root", force = true).isSuccess)
+        assertEquals(2, calls)
+        assertEquals("\"v1\"", seenEtags.last())
+        now += CloudFileRepository.FILE_CACHE_TTL_MS + 1
+        assertTrue(repository.refresh("acc1", "root").isSuccess)
+        assertEquals(3, calls)
+    }
+
+    @Test
+    fun concurrentFolderRefreshesAreDeduplicated() = runTest {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        var calls = 0
+        fakeApi.getFilesHandler = { _, _, _, _, _, _ ->
+            calls++; gate.await()
+            Response.success(listOf(CloudFile(id = "same", name = "Item.txt", type = "file")),
+                Headers.headersOf("ETag", "\"same\""))
+        }
+        val first = async { repository.refresh("acc1", "root") }
+        val second = async { repository.refresh("acc1", "root") }
+        testScheduler.runCurrent()
+        assertEquals(1, calls)
+        gate.complete(Unit); advanceUntilIdle()
+        assertTrue(first.await().isSuccess); assertTrue(second.await().isSuccess)
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun failedLaterPageDoesNotPolluteCompleteCachedFolder() = runTest {
+        val old = CloudFile(id = "old-file", name = "AlreadyCached.txt", type = "file")
+        db.cloudFileDao().insertFiles(listOf(LocalCloudFile.fromCloudFile(old, "acc1", "root")))
+        fakeApi.getFilesHandler = { _, _, _, cursor, _, _ ->
+            if (cursor == null) Response.success(
+                listOf(CloudFile(id = "partial-file", name = "PartialPage.txt", type = "file")),
+                Headers.headersOf("X-Next-Cursor", "page_2"))
+            else Response.error(500, """{"error":"page failed"}""".toResponseBody("application/json".toMediaType()))
+        }
+        assertTrue(repository.refresh("acc1", "root", force = true).isFailure)
+        assertEquals(listOf("old-file"), db.cloudFileDao().getFilesForFolder("acc1", "root").map { it.id })
     }
 
     @Test

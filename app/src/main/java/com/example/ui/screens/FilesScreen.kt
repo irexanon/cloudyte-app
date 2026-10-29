@@ -13,6 +13,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -36,10 +41,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -87,6 +94,8 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
@@ -219,10 +228,18 @@ class FilesViewModel(
     val currentAccountId = MutableStateFlow<String?>(prefs.getString("last_active_account_id", null))
     val currentFolderId = MutableStateFlow<String?>(null)
 
-    val files: StateFlow<List<CloudFile>> = combine(currentAccountId, currentFolderId) { accId, folderId ->
-        accId to folderId
-    }.flatMapLatest { (accId, folderId) ->
-        repo.observeFolder(accId, folderId)
+    private val currentFilesLocation: StateFlow<Pair<String?, String?>> =
+        combine(currentAccountId, currentFolderId) { accId, folderId -> accId to folderId }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, currentAccountId.value to currentFolderId.value)
+
+    private val observedFiles: StateFlow<Pair<Pair<String?, String?>, List<CloudFile>>?> =
+        currentFilesLocation.flatMapLatest { location ->
+            repo.observeFolder(location.first, location.second).map { rows -> location to rows }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    // Do not briefly expose the previous account/folder snapshot after navigation.
+    val files: StateFlow<List<CloudFile>> = combine(currentFilesLocation, observedFiles) { location, snapshot ->
+        snapshot?.takeIf { it.first == location }?.second.orEmpty()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val accounts: StateFlow<List<Account>> = db.accountDao().getAllAccountsFlow()
@@ -234,6 +251,8 @@ class FilesViewModel(
 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+    private val _showRefreshIndicator = MutableStateFlow(false)
+    val showRefreshIndicator: StateFlow<Boolean> = _showRefreshIndicator.asStateFlow()
 
     private val _isUploading = MutableStateFlow(false)
     val isUploading: StateFlow<Boolean> = _isUploading.asStateFlow()
@@ -249,6 +268,7 @@ class FilesViewModel(
 
     var refreshJob: Job? = null
         private set
+    private var refreshGeneration: Long = 0L
 
     init {
         viewModelScope.launch {
@@ -285,7 +305,8 @@ class FilesViewModel(
             currentFolderId.value = null
             _breadcrumbs.value = listOf(BreadcrumbItem(null, "Files"))
             prefs.edit().putString("last_active_account_id", accountId).apply()
-            refresh(force = true)
+            // Show cached Room rows first; refresh only if this account/folder is stale.
+            refresh(force = false)
         }
     }
 
@@ -317,14 +338,18 @@ class FilesViewModel(
         }
     }
 
-    fun refresh(force: Boolean = true) {
+    fun refresh(force: Boolean = false, showIndicator: Boolean = false) {
         val accId = currentAccountId.value ?: accounts.value.firstOrNull()?.effectiveId
         val folderId = currentFolderId.value
+        val generation = ++refreshGeneration
         refreshJob?.cancel()
+        _isRefreshing.value = true
+        _showRefreshIndicator.value = showIndicator
+        _isOffline.value = false
         refreshJob = viewModelScope.launch {
-            _isRefreshing.value = true
             try {
-                repo.refresh(accId, folderId)
+                // Repository failures are returned as Result, not thrown automatically.
+                repo.refresh(accId, folderId, force = force).getOrThrow()
                 _isOffline.value = false
             } catch (e: Exception) {
                 if (e !is kotlinx.coroutines.CancellationException) {
@@ -332,7 +357,10 @@ class FilesViewModel(
                     _isOffline.value = true
                 }
             } finally {
-                _isRefreshing.value = false
+                if (generation == refreshGeneration) {
+                    _isRefreshing.value = false
+                    _showRefreshIndicator.value = false
+                }
             }
         }
     }
@@ -398,6 +426,7 @@ fun FilesScreen(
     val currentFolderId by viewModel.currentFolderId.collectAsState()
     val breadcrumbs by viewModel.breadcrumbs.collectAsState()
     val isRefreshing by viewModel.isRefreshing.collectAsState()
+    val showRefreshIndicator by viewModel.showRefreshIndicator.collectAsState()
     val isUploading by viewModel.isUploading.collectAsState()
     val isOffline by viewModel.isOffline.collectAsState()
 
@@ -753,8 +782,8 @@ fun FilesScreen(
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                        IconButton(onClick = { viewModel.refresh(force = true) }) {
-                            if (isRefreshing && files.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.refresh(force = true, showIndicator = true) }) {
+                            if (showRefreshIndicator && isRefreshing && files.isNotEmpty()) {
                                 AppLoadingIndicator(size = 20.dp, color = MaterialTheme.colorScheme.primary)
                             } else {
                                 Icon(
@@ -833,8 +862,8 @@ fun FilesScreen(
         }
     ) { innerPadding ->
         PullToRefreshBox(
-            isRefreshing = isRefreshing && files.isNotEmpty(),
-            onRefresh = { viewModel.refresh(force = true) },
+            isRefreshing = showRefreshIndicator && isRefreshing && files.isNotEmpty(),
+            onRefresh = { viewModel.refresh(force = true, showIndicator = true) },
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
@@ -1019,13 +1048,23 @@ fun FilesScreen(
                             }
                         }
 
-                        if (folders.isEmpty() && regularFiles.isEmpty() && !isRefreshing) {
-                            item(span = { GridItemSpan(maxLineSpan) }, key = "empty_state") {
-                                FilesEmptyState(
-                                    isSearch = searchQuery.isNotBlank(),
-                                    onCreateFolder = { showCreateFolderDialog = true },
-                                    onUploadFile = { filePickerLauncher.launch("*/*") }
-                                )
+                        if (folders.isEmpty() && regularFiles.isEmpty()) {
+                            if (isRefreshing && files.isEmpty()) {
+                                item(span = { GridItemSpan(maxLineSpan) }, key = "loading_skeleton") {
+                                    FilesLoadingSkeleton(isGrid = true)
+                                }
+                            } else if (isOffline && files.isEmpty()) {
+                                item(span = { GridItemSpan(maxLineSpan) }, key = "load_error") {
+                                    FilesLoadErrorState(onRetry = { viewModel.refresh(force = true, showIndicator = true) })
+                                }
+                            } else {
+                                item(span = { GridItemSpan(maxLineSpan) }, key = "empty_state") {
+                                    FilesEmptyState(
+                                        isSearch = searchQuery.isNotBlank(),
+                                        onCreateFolder = { showCreateFolderDialog = true },
+                                        onUploadFile = { filePickerLauncher.launch("*/*") }
+                                    )
+                                }
                             }
                         }
                     }
@@ -1198,13 +1237,21 @@ fun FilesScreen(
                             }
                         }
 
-                        if (folders.isEmpty() && regularFiles.isEmpty() && !isRefreshing) {
-                            item(key = "empty_state") {
-                                FilesEmptyState(
-                                    isSearch = searchQuery.isNotBlank(),
-                                    onCreateFolder = { showCreateFolderDialog = true },
-                                    onUploadFile = { filePickerLauncher.launch("*/*") }
-                                )
+                        if (folders.isEmpty() && regularFiles.isEmpty()) {
+                            if (isRefreshing && files.isEmpty()) {
+                                item(key = "loading_skeleton") { FilesLoadingSkeleton(isGrid = false) }
+                            } else if (isOffline && files.isEmpty()) {
+                                item(key = "load_error") {
+                                    FilesLoadErrorState(onRetry = { viewModel.refresh(force = true, showIndicator = true) })
+                                }
+                            } else {
+                                item(key = "empty_state") {
+                                    FilesEmptyState(
+                                        isSearch = searchQuery.isNotBlank(),
+                                        onCreateFolder = { showCreateFolderDialog = true },
+                                        onUploadFile = { filePickerLauncher.launch("*/*") }
+                                    )
+                                }
                             }
                         }
                     }
@@ -1216,96 +1263,39 @@ fun FilesScreen(
 
 @Composable
 fun AccountSwitcherChipRow(
-    accounts: List<Account>,
-    currentAccountId: String?,
-    onSelectAccount: (String) -> Unit,
-    onAddDrive: () -> Unit
+    accounts: List<Account>, currentAccountId: String?,
+    onSelectAccount: (String) -> Unit, onAddDrive: () -> Unit
 ) {
     LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically
     ) {
         items(accounts, key = { it.effectiveId }) { acc ->
-            val isSelected = acc.effectiveId == currentAccountId
+            val selected = acc.effectiveId == currentAccountId
             val providerColor = when {
                 acc.effectiveType.contains("google", true) -> ProviderGoogle
                 acc.effectiveType.contains("one", true) -> ProviderOneDrive
                 else -> ProviderTelegram
             }
-            val initialLetter = (acc.effectiveName.firstOrNull() ?: 'D').uppercaseChar().toString()
-
-            Surface(
-                shape = CircleShape,
-                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-                border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
-                modifier = Modifier.clickable { onSelectAccount(acc.effectiveId) }
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clip(CircleShape)
-                            .background(providerColor.copy(alpha = 0.2f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = initialLetter,
-                            color = providerColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+            val initial = (acc.effectiveName.firstOrNull() ?: 'D').uppercaseChar().toString()
+            FilterChip(
+                selected = selected, onClick = { onSelectAccount(acc.effectiveId) },
+                label = { Text(acc.effectiveName, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 144.dp)) },
+                leadingIcon = {
+                    Box(Modifier.size(20.dp).clip(CircleShape).background(providerColor.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center) {
+                        Text(initial, color = providerColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = acc.effectiveName,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1
-                    )
-                    if (isSelected) {
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = "Active account",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
+                },
+                trailingIcon = if (selected) {
+                    { Icon(Icons.Default.ArrowDropDown, contentDescription = "Active account", modifier = Modifier.size(18.dp)) }
+                } else null
+            )
         }
-        item {
-            Surface(
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                modifier = Modifier.clickable { onAddDrive() }
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Add drive",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
+        item(key = "add_drive") {
+            AssistChip(onClick = onAddDrive, label = { Text("Add drive") },
+                leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp)) })
         }
     }
 }
@@ -1330,7 +1320,7 @@ fun ControlsRow(
         // Sort Dropdown on the left: ("Name" + chevron)
         Box {
             Surface(
-                shape = MaterialTheme.shapes.small,
+                shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.clickable { onToggleSortDropdown(true) }
             ) {
@@ -1501,6 +1491,69 @@ fun OfflineBanner() {
     }
 }
 
+@Composable
+private fun FilesLoadingSkeleton(isGrid: Boolean) {
+    val transition = rememberInfiniteTransition(label = "filesSkeleton")
+    val alpha by transition.animateFloat(0.35f, 0.75f,
+        animationSpec = infiniteRepeatable(tween(850), repeatMode = RepeatMode.Reverse), label = "filesSkeletonAlpha")
+    val placeholder = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha)
+    if (isGrid) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            repeat(3) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    repeat(2) {
+                        Column(Modifier.weight(1f).clip(MaterialTheme.shapes.large)
+                            .background(MaterialTheme.colorScheme.surfaceContainer).padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(color = placeholder, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().height(92.dp)) {}
+                            Surface(color = placeholder, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth(0.82f).height(12.dp)) {}
+                            Surface(color = placeholder, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth(0.48f).height(9.dp)) {}
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            repeat(5) {
+                Row(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Surface(color = placeholder, shape = MaterialTheme.shapes.medium, modifier = Modifier.size(48.dp)) {}
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Surface(color = placeholder, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth(0.7f).height(12.dp)) {}
+                        Surface(color = placeholder, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth(0.42f).height(9.dp)) {}
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilesLoadErrorState(onRetry: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Box(Modifier.size(64.dp).clip(MaterialTheme.shapes.large).background(MaterialTheme.colorScheme.errorContainer),
+            contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.CloudOff, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(30.dp))
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("Couldn't load files", style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.height(6.dp))
+        Text("Check your connection and try again.", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onRetry) {
+            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp)); Text("Try again")
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FolderGridItem(
@@ -1526,10 +1579,10 @@ fun FolderGridItem(
     Card(
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = cardBg),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.cardElevation(),
         modifier = modifier
             .fillMaxWidth()
-            .aspectRatio(1.15f)
+            .aspectRatio(0.92f)
             .combinedClickable(
                 onClick = {
                     if (isSelectionMode && onToggleSelect != null) {
@@ -1672,10 +1725,10 @@ fun FileGridItem(
     Card(
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = cardBg),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.cardElevation(),
         modifier = modifier
             .fillMaxWidth()
-            .aspectRatio(0.85f)
+            .aspectRatio(0.92f)
             .combinedClickable(
                 onClick = {
                     if (isSelectionMode && onToggleSelect != null) {
@@ -1834,10 +1887,10 @@ fun FileRow(
     Card(
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = rowBg),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        elevation = CardDefaults.cardElevation(),
         modifier = modifier
             .fillMaxWidth()
-            .height(64.dp)
+            .heightIn(min = 64.dp)
             .combinedClickable(
                 onClick = {
                     if (isSelectionMode && onToggleSelect != null) {
@@ -1854,8 +1907,8 @@ fun FileRow(
     ) {
         Row(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 12.dp),
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (isSelected) {
@@ -1971,7 +2024,7 @@ fun FilesEmptyState(
         Box(
             modifier = Modifier
                 .size(64.dp)
-                .clip(CircleShape)
+                .clip(MaterialTheme.shapes.large)
                 .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {

@@ -10,7 +10,11 @@ import com.example.api.StorageSummary
 import com.example.db.AppDatabase
 import com.example.db.LocalCloudFile
 import com.example.db.LocalStorageSummary
+import com.example.db.FolderSyncState
+import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,14 +27,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.coroutines.ContinuationInterceptor
 
 class CloudFileRepository @JvmOverloads constructor(
     private val db: AppDatabase,
     private val api: CloudyteApi,
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) {
-    private val etagMap = ConcurrentHashMap<String, String>()
+    private data class FolderCacheKey(val accountKey: String, val folderKey: String)
+    private val folderRefreshMutexes = ConcurrentHashMap<FolderCacheKey, Mutex>()
     private val storageRefreshTimestamps = ConcurrentHashMap<String, Long>()
 
     private val _storageRefreshing = MutableStateFlow<Set<String>>(emptySet())
@@ -41,13 +45,15 @@ class CloudFileRepository @JvmOverloads constructor(
 
     companion object {
         const val STORAGE_REFRESH_INTERVAL_MS = 60_000L
+        const val FILE_CACHE_TTL_MS = 60_000L
         private const val ALL_ACCOUNTS_KEY = "all"
     }
 
-    private fun folderKey(accountId: String?, folderId: String?): String {
-        val safeFolderId = if (folderId.isNullOrBlank() || folderId == "root") "root" else folderId
-        return "${accountId ?: "null"}:$safeFolderId"
-    }
+    private fun safeFolderId(folderId: String?): String =
+        if (folderId.isNullOrBlank() || folderId == "root") "root" else folderId
+
+    private fun accountCacheKey(accountId: String?): String =
+        if (accountId == null) "N" else "A:$accountId"
 
     fun observeFolder(accountId: String?, folderId: String?): Flow<List<CloudFile>> {
         val safeFolderId = if (folderId.isNullOrBlank() || folderId == "root") "root" else folderId
@@ -56,74 +62,75 @@ class CloudFileRepository @JvmOverloads constructor(
         }
     }
 
-    suspend fun refresh(accountId: String?, folderId: String?): Result<Unit> {
-        return try {
-            val safeFolderId = if (folderId.isNullOrBlank() || folderId == "root") "root" else folderId
-            val key = folderKey(accountId, safeFolderId)
-            val storedEtag = etagMap[key]
-            val apiFolderId = if (safeFolderId == "root") null else safeFolderId
-            val apiAccountId = if (accountId.isNullOrBlank() || accountId == "root") null else accountId
+    /**
+     * Room remains the UI source of truth. Fresh persisted sync metadata prevents redundant calls
+     * across folder navigation and app restarts. force=true bypasses TTL but preserves ETag use.
+     */
+    suspend fun refresh(accountId: String?, folderId: String?, force: Boolean = false): Result<Unit> {
+        val normalizedFolderId = safeFolderId(folderId)
+        val accountKey = accountCacheKey(accountId)
+        val cacheKey = FolderCacheKey(accountKey, normalizedFolderId)
+        val mutex = folderRefreshMutexes.computeIfAbsent(cacheKey) { Mutex() }
+        return mutex.withLock {
+            var previousState: FolderSyncState? = null
+            try {
+                previousState = db.folderSyncStateDao().get(accountKey, normalizedFolderId)
+                val lastSync = previousState?.lastSuccessfulSyncAt ?: 0L
+                val age = nowMillis() - lastSync
+                val fresh = previousState != null && lastSync > 0L && age >= 0L && age < FILE_CACHE_TTL_MS
+                if (!force && fresh) return@withLock Result.success(Unit)
 
-            val allFiles = mutableListOf<CloudFile>()
-            var cursor: String? = null
-            var isFirstPage = true
-
-            while (true) {
-                val response = api.getFiles(
-                    accountId = apiAccountId,
-                    folderId = apiFolderId,
-                    search = null,
-                    cursor = cursor,
-                    limit = 100,
-                    ifNoneMatch = if (isFirstPage) storedEtag else null
-                )
-
-                if (isFirstPage && response.code() == 304) {
-                    // 304 Not Modified: server data hasn't changed
-                    return Result.success(Unit)
-                }
-
-                if (!response.isSuccessful) {
-                    val rawErr = response.errorBody()?.string()
-                    val errMessage = ApiClient.parseError(rawErr, response.code())
-                    throw Exception(errMessage)
-                }
-
-                if (isFirstPage) {
-                    val etag = response.headers()["ETag"]
-                    if (!etag.isNullOrBlank()) {
-                        etagMap[key] = etag
+                val apiFolderId = if (normalizedFolderId == "root") null else normalizedFolderId
+                val apiAccountId = if (accountId.isNullOrBlank() || accountId == "root") null else accountId
+                val allFiles = mutableListOf<CloudFile>()
+                var cursor: String? = null
+                var firstPage = true
+                var responseEtag: String? = previousState?.etag
+                while (true) {
+                    val response = api.getFiles(
+                        accountId = apiAccountId, folderId = apiFolderId, search = null,
+                        cursor = cursor, limit = 100,
+                        ifNoneMatch = if (firstPage) previousState?.etag else null
+                    )
+                    if (firstPage && response.code() == 304) {
+                        db.folderSyncStateDao().upsert(FolderSyncState(
+                            accountKey = accountKey, folderKey = normalizedFolderId,
+                            etag = response.headers()["ETag"] ?: previousState?.etag,
+                            lastSuccessfulSyncAt = nowMillis()
+                        ))
+                        return@withLock Result.success(Unit)
                     }
+                    if (!response.isSuccessful) {
+                        val rawErr = response.errorBody()?.string()
+                        throw Exception(ApiClient.parseError(rawErr, response.code()))
+                    }
+                    if (firstPage) responseEtag = response.headers()["ETag"]?.takeIf { it.isNotBlank() }
+                    // Keep Room unchanged until every page succeeds.
+                    allFiles.addAll(response.body().orEmpty())
+                    val nextCursor = response.headers()["X-Next-Cursor"]
+                    if (nextCursor.isNullOrBlank() || nextCursor == cursor) break
+                    cursor = nextCursor
+                    firstPage = false
                 }
-
-                val pageFiles = response.body().orEmpty()
-                allFiles.addAll(pageFiles)
-
-                // Upsert each page as it arrives
-                val localPage = pageFiles.map { LocalCloudFile.fromCloudFile(it, accountId, safeFolderId) }
-                if (localPage.isNotEmpty()) {
-                    db.cloudFileDao().insertFiles(localPage)
+                val localFiles = allFiles.map { LocalCloudFile.fromCloudFile(it, accountId, normalizedFolderId) }
+                db.withTransaction {
+                    db.cloudFileDao().replaceFolder(accountId, normalizedFolderId, localFiles)
+                    db.folderSyncStateDao().upsert(FolderSyncState(
+                        accountKey = accountKey, folderKey = normalizedFolderId,
+                        etag = responseEtag, lastSuccessfulSyncAt = nowMillis()
+                    ))
                 }
-
-                val nextCursor = response.headers()["X-Next-Cursor"]
-                if (nextCursor.isNullOrBlank() || nextCursor == cursor) {
-                    break
-                }
-                cursor = nextCursor
-                isFirstPage = false
+                FileRepository.cacheFiles(allFiles)
+                Result.success(Unit)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                try {
+                    val state = previousState ?: db.folderSyncStateDao().get(accountKey, normalizedFolderId)
+                    if (state != null) db.folderSyncStateDao().upsert(state.copy(lastSuccessfulSyncAt = 0L))
+                } catch (_: Exception) { }
+                Result.failure(e)
             }
-
-            // Replace folder with the full set
-            val allLocal = allFiles.map { LocalCloudFile.fromCloudFile(it, accountId, safeFolderId) }
-            db.cloudFileDao().replaceFolder(accountId, safeFolderId, allLocal)
-
-            // Cache files so viewers continue working
-            FileRepository.cacheFiles(allFiles)
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
@@ -216,8 +223,8 @@ class CloudFileRepository @JvmOverloads constructor(
             db.cloudFileDao().deleteById(tempId)
 
             if (response.isSuccessful) {
-                // Refresh folder to pull canonical server folder record
-                refresh(accountId, safeParentId)
+                // Refresh the canonical record and report sync failures.
+                refresh(accountId, safeParentId, force = true).getOrThrow()
                 Result.success(Unit)
             } else {
                 val err = ApiClient.parseError(response.errorBody()?.string(), response.code())

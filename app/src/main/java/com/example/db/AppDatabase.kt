@@ -14,9 +14,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LocalUploadRecord::class,
         LocalExclusion::class,
         LocalTransfer::class,
-        LocalStorageSummary::class
+        LocalStorageSummary::class,
+        FolderSyncState::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun exclusionDao(): ExclusionDao
     abstract fun transferDao(): TransferDao
     abstract fun storageSummaryDao(): StorageSummaryDao
+    abstract fun folderSyncStateDao(): FolderSyncStateDao
 
     companion object {
         @Volatile
@@ -87,6 +89,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS folder_sync_state (
+                        accountKey TEXT NOT NULL,
+                        folderKey TEXT NOT NULL,
+                        etag TEXT,
+                        lastSuccessfulSyncAt INTEGER NOT NULL,
+                        PRIMARY KEY(accountKey, folderKey)
+                    )
+                """.trimIndent())
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -94,7 +110,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "cloud_app_database"
                 )
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                     .build()
                 INSTANCE = instance
                 instance
