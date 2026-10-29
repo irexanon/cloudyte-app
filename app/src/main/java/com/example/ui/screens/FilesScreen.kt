@@ -1320,7 +1320,7 @@ fun ControlsRow(
         // Sort Dropdown on the left: ("Name" + chevron)
         Box {
             Surface(
-                shape = MaterialTheme.shapes.large,
+                shape = MaterialTheme.shapes.extraLarge,
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.clickable { onToggleSortDropdown(true) }
             ) {
@@ -2024,7 +2024,7 @@ fun FilesEmptyState(
         Box(
             modifier = Modifier
                 .size(64.dp)
-                .clip(MaterialTheme.shapes.large)
+                .clip(MaterialTheme.shapes.medium)
                 .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
