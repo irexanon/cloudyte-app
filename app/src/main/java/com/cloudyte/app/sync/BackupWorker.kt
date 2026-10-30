@@ -385,16 +385,29 @@ class BackupWorker(
                             totalCount = totalFilesToProcess
                         )
 
-                        val uploadResult = UploadHelper.uploadFile(
-                            context = context,
-                            accountId = accountId,
-                            folderId = currentCloudFolderId,
-                            uri = file.uri,
-                            explicitFileName = fileName,
-                            explicitMimeType = file.type,
-                            explicitFileSize = fileSize,
-                            idempotencyKey = ResumableTransfer.newIdempotencyKey(transferId)
-                        )
+                        val uploadResult = if (fileSize >= ResumableTransfer.DEFAULT_CHUNK_SIZE) {
+                            UploadHelper.uploadFileResumable(
+                                context = context,
+                                accountId = accountId,
+                                folderId = currentCloudFolderId,
+                                uri = file.uri,
+                                explicitFileName = fileName,
+                                explicitMimeType = file.type,
+                                explicitFileSize = fileSize,
+                                idempotencyKey = ResumableTransfer.newIdempotencyKey(transferId)
+                            )
+                        } else {
+                            UploadHelper.uploadFile(
+                                context = context,
+                                accountId = accountId,
+                                folderId = currentCloudFolderId,
+                                uri = file.uri,
+                                explicitFileName = fileName,
+                                explicitMimeType = file.type,
+                                explicitFileSize = fileSize,
+                                idempotencyKey = ResumableTransfer.newIdempotencyKey(transferId)
+                            )
+                        }
 
                         if (uploadResult.isSuccess) {
                             transferRepository.updateProgress(transferId, fileSize, fileSize)

@@ -13,6 +13,7 @@ import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Part
 import retrofit2.http.Path
+import retrofit2.http.PUT
 import retrofit2.http.Query
 import retrofit2.http.Streaming
 
@@ -79,6 +80,23 @@ interface CloudyteApi {
         @Header("X-File-Checksum") checksum: String? = null,
         @Header("X-Upload-Session") uploadSession: String? = null
     ): Response<ResponseBody>
+
+    @POST("/api/upload-sessions/{accountId}")
+    suspend fun createUploadSession(
+        @Path("accountId") accountId: String,
+        @Body request: UploadSessionRequest
+    ): Response<UploadSessionResponse>
+
+    @Multipart
+    @PUT("/api/upload-sessions/{sessionId}/chunks")
+    suspend fun uploadChunk(
+        @Path("sessionId") sessionId: String,
+        @Header("Content-Range") contentRange: String,
+        @Part chunk: MultipartBody.Part
+    ): Response<UploadChunkResponse>
+
+    @POST("/api/upload-sessions/{sessionId}/complete")
+    suspend fun completeUploadSession(@Path("sessionId") sessionId: String): Response<UploadCompleteResponse>
 
     @Streaming
     @GET("/api/download/{accountId}/{fileId}")

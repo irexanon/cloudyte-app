@@ -20,6 +20,7 @@ import okio.source
 import retrofit2.HttpException
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 
 data class UploadResult(
     val isSuccess: Boolean,
@@ -180,6 +181,89 @@ object UploadHelper {
                     isIoError = e.cause is IOException
                 )
             }
+        }
+    }
+
+    suspend fun uploadFileResumable(
+        context: Context,
+        accountId: String,
+        folderId: String?,
+        uri: Uri,
+        explicitFileName: String,
+        explicitMimeType: String,
+        explicitFileSize: Long,
+        idempotencyKey: String
+    ): UploadResult = withContext(Dispatchers.IO) {
+        try {
+            val resolver = context.contentResolver
+            val totalBytes = explicitFileSize
+            if (totalBytes < 0L) throw IOException("File size is required for resumable upload")
+            val digest = MessageDigest.getInstance("SHA-256")
+            resolver.openInputStream(uri)?.use { input ->
+                val buffer = ByteArray(1024 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    digest.update(buffer, 0, read)
+                }
+            } ?: throw IOException("Cannot open local file stream")
+            val checksum = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            val sessionResponse = ApiClient.apiService.createUploadSession(
+                accountId,
+                UploadSessionRequest(
+                    fileName = explicitFileName,
+                    mimeType = explicitMimeType,
+                    size = totalBytes,
+                    folderId = folderId,
+                    checksum = checksum,
+                    idempotencyKey = idempotencyKey
+                )
+            )
+            if (!sessionResponse.isSuccessful || sessionResponse.body() == null) {
+                return@withContext UploadResult(false, sessionResponse.code(), "Could not create upload session", explicitFileName)
+            }
+            val session = sessionResponse.body()!!
+            var offset = session.receivedBytes
+            val chunkSize = session.chunkSize.coerceAtLeast(64L * 1024L).coerceAtMost(16L * 1024L * 1024L)
+            resolver.openInputStream(uri)?.use { input ->
+                var skipped = 0L
+                while (skipped < offset) {
+                    val n = input.skip(offset - skipped)
+                    if (n <= 0L) throw IOException("Could not seek to resumable upload offset $offset")
+                    skipped += n
+                }
+                while (offset < totalBytes) {
+                    val expected = minOf(chunkSize, totalBytes - offset).toInt()
+                    val bytes = ByteArray(expected)
+                    var readTotal = 0
+                    while (readTotal < expected) {
+                        val read = input.read(bytes, readTotal, expected - readTotal)
+                        if (read <= 0) throw IOException("Unexpected end of local file")
+                        readTotal += read
+                    }
+                    val body = bytes.toRequestBody(explicitMimeType.toMediaTypeOrNull())
+                    val part = MultipartBody.Part.createFormData("chunk", explicitFileName, body)
+                    val response = ApiClient.apiService.uploadChunk(
+                        sessionId = session.sessionId,
+                        contentRange = "bytes $offset-${offset + readTotal - 1}/$totalBytes",
+                        chunk = part
+                    )
+                    if (!response.isSuccessful || response.body() == null) {
+                        return@withContext UploadResult(false, response.code(), "Chunk upload failed at offset $offset", explicitFileName)
+                    }
+                    offset = response.body()!!.nextOffset
+                }
+            } ?: throw IOException("Cannot open local file stream")
+            val complete = ApiClient.apiService.completeUploadSession(session.sessionId)
+            if (complete.isSuccessful && complete.body()?.success == true) {
+                UploadResult(true, complete.code(), fileName = explicitFileName)
+            } else {
+                UploadResult(false, complete.code(), "Could not finalize upload session", explicitFileName)
+            }
+        } catch (e: IOException) {
+            UploadResult(false, errorMessage = e.message ?: "Resumable upload I/O error", fileName = explicitFileName, isIoError = true)
+        } catch (e: Exception) {
+            UploadResult(false, errorMessage = e.message ?: "Resumable upload failed", fileName = explicitFileName, isIoError = e.cause is IOException)
         }
     }
 

@@ -294,3 +294,39 @@ fun parseBytes(value: Any?): Long {
         else -> return 0L
     }
 }
+
+@JsonClass(generateAdapter = true)
+data class UploadSessionRequest(
+    val fileName: String,
+    val mimeType: String,
+    val size: Long,
+    val folderId: String? = null,
+    val checksum: String? = null,
+    val idempotencyKey: String
+)
+
+@JsonClass(generateAdapter = true)
+data class UploadSessionResponse(
+    val sessionId: String,
+    val status: String,
+    val receivedBytes: Long = 0L,
+    val totalBytes: Long = 0L,
+    val chunkSize: Long = 8L * 1024L * 1024L,
+    val checksum: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class UploadChunkResponse(
+    val sessionId: String,
+    val receivedBytes: Long,
+    val totalBytes: Long,
+    val nextOffset: Long,
+    val complete: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class UploadCompleteResponse(
+    val success: Boolean = false,
+    val sessionId: String,
+    val checksum: String? = null
+)
