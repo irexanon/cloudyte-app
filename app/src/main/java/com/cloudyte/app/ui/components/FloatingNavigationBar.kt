@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.Icon
@@ -71,7 +70,6 @@ fun FloatingNavigationBar(
         FloatingNavItem("home", stringResource(R.string.nav_home), Icons.Default.Home),
         FloatingNavItem("files", stringResource(R.string.nav_files), Icons.Default.Folder),
         FloatingNavItem("transfers", stringResource(R.string.nav_transfers), Icons.Default.SwapVert),
-        FloatingNavItem("accounts", stringResource(R.string.nav_accounts), Icons.Default.Person),
         FloatingNavItem("settings", stringResource(R.string.nav_settings), Icons.Default.Settings)
     )
 
@@ -127,7 +125,7 @@ fun FloatingNavigationBar(
                         )
                 )
 
-                // Row of 5 navigation items
+                // Row of primary navigation items
                 Row(
                     modifier = Modifier.fillMaxSize(),
                     verticalAlignment = Alignment.CenterVertically

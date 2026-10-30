@@ -69,7 +69,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -493,11 +492,15 @@ fun FilesScreen(
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var newFolderName by remember { mutableStateOf("") }
     var showAddAccountDialog by remember { mutableStateOf(false) }
+    var isFabExpanded by remember { mutableStateOf(false) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
             snackbarMessage = "Uploading file..."
         }
+    }
+    val folderPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let { snackbarMessage = "Uploading folder..." }
     }
 
     val listState = rememberLazyListState()
@@ -758,28 +761,25 @@ fun FilesScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.padding(bottom = LocalBottomBarInset.current)
             ) {
-                // Circular New Folder button above the + FAB (matching Image 1)
-                SmallFloatingActionButton(
-                    onClick = { showCreateFolderDialog = true },
-                    shape = CircleShape,
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(44.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CreateNewFolder,
-                        contentDescription = "New Folder",
-                        modifier = Modifier.size(20.dp)
-                    )
+                if (isFabExpanded) {
+                    SmallFloatingActionButton(
+                        onClick = { isFabExpanded = false; showCreateFolderDialog = true },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ) { Icon(Icons.Default.CreateNewFolder, "New Folder") }
+                    SmallFloatingActionButton(
+                        onClick = { isFabExpanded = false; filePickerLauncher.launch("*/*") },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ) { Icon(Icons.Default.FolderOpen, "Upload file") }
+                    SmallFloatingActionButton(
+                        onClick = { isFabExpanded = false; folderPickerLauncher.launch(null) },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.primary
+                    ) { Icon(Icons.Default.Folder, "Upload folder") }
                 }
-
-                // Rounded-square blue + FAB
                 FloatingActionButton(
-                    onClick = {
-                        if (!isUploading) {
-                            filePickerLauncher.launch("*/*")
-                        }
-                    },
+                    onClick = { if (!isUploading) isFabExpanded = !isFabExpanded },
                     shape = RoundedCornerShape(18.dp),
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -790,7 +790,7 @@ fun FilesScreen(
                     } else {
                         Icon(
                             imageVector = Icons.Default.Add,
-                            contentDescription = "Upload file",
+                            contentDescription = if (isFabExpanded) "Close actions" else "Add",
                             modifier = Modifier.size(26.dp)
                         )
                     }
@@ -883,17 +883,8 @@ fun FilesScreen(
                             }
                         }
 
-                        // Folders section
+                        // Folders are rendered inline with the drive contents.
                         if (folders.isNotEmpty()) {
-                            item(span = { GridItemSpan(maxLineSpan) }, key = "folders_header") {
-                                Text(
-                                    text = "Folders",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
-                                )
-                            }
                             items(
                                 items = folders,
                                 key = { it.effectiveId.ifEmpty { "folder_${it.effectiveName}" } }
@@ -919,17 +910,8 @@ fun FilesScreen(
                             }
                         }
 
-                        // Files section
+                        // Files continue directly after folders with no section divider.
                         if (regularFiles.isNotEmpty()) {
-                            item(span = { GridItemSpan(maxLineSpan) }, key = "files_header") {
-                                Text(
-                                    text = "Files",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.padding(top = 12.dp, bottom = 2.dp)
-                                )
-                            }
                             items(
                                 items = regularFiles,
                                 key = { it.effectiveId.ifEmpty { "file_${it.effectiveName}" } }
@@ -1115,8 +1097,7 @@ private fun OriginalFilesHeaderBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -1217,7 +1198,7 @@ private fun OriginalFilesHeaderBar(
             }
         }
 
-        // 2. Center Search Pill Bar (with Search icon on left and Refresh icon on right)
+        // 2. Center Search Pill Bar
         Surface(
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -1274,25 +1255,6 @@ private fun OriginalFilesHeaderBar(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp)
                         )
-                    }
-                } else {
-                    IconButton(
-                        onClick = onRefresh,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        if (isRefreshing) {
-                            AppLoadingIndicator(
-                                color = MaterialTheme.colorScheme.primary,
-                                size = 18.dp
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Refresh",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
                     }
                 }
             }

@@ -1,5 +1,6 @@
 package com.cloudyte.app.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -52,6 +53,13 @@ fun SettingsScreen(
     var selectedSection by remember { mutableStateOf<SettingsSectionType?>(null) }
     var currentSubScreen by remember { mutableStateOf<String?>(null) }
 
+    BackHandler(enabled = currentSubScreen != null || selectedSection != null) {
+        when {
+            currentSubScreen != null -> currentSubScreen = null
+            else -> selectedSection = null
+        }
+    }
+
     if (currentSubScreen == "EXCLUSIONS") {
         ExclusionsScreen(onBack = { currentSubScreen = null })
         return
@@ -76,11 +84,8 @@ fun SettingsScreen(
             onBack = { selectedSection = null },
             onNavigateExclusions = { currentSubScreen = "EXCLUSIONS" },
             onNavigateAccounts = {
-                if (bottomNavController != null) {
-                    bottomNavController.navigateSingleTopRestore("accounts")
-                } else {
-                    currentSubScreen = "ACCOUNTS"
-                }
+                // Accounts are managed from Settings, not the primary navigation bar.
+                currentSubScreen = "ACCOUNTS"
             },
             onLogout = onLogout
         )

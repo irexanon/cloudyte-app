@@ -215,7 +215,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val cachedDefault = _accounts.value.firstOrNull { it.isDefault == true } ?: _accounts.value.firstOrNull()
                 val cachedAccountId = cachedDefault?.effectiveId?.takeIf { it.isNotBlank() && it != "root" }
                 _currentAccountId.value = cachedAccountId
-                val cachedFiles = db.cloudFileDao().getFilesForFolder(cachedAccountId, "root")
+                val cachedFiles = db.cloudFileDao().getRecentFiles(8)
                 if (cachedFiles.isNotEmpty()) {
                     _recentFiles.value = cachedFiles.map { it.toCloudFile() }.take(8)
                     FileRepository.cacheFiles(_recentFiles.value)
@@ -248,7 +248,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 repository.refresh(accId, "root", force = forceStorageRefresh)
-                val updatedFiles = db.cloudFileDao().getFilesForFolder(accId, "root").map { it.toCloudFile() }
+                val updatedFiles = db.cloudFileDao().getRecentFiles(8).map { it.toCloudFile() }
                 if (updatedFiles.isNotEmpty()) {
                     _recentFiles.value = updatedFiles.take(8)
                     FileRepository.cacheFiles(updatedFiles)
@@ -453,8 +453,7 @@ fun HomeScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(top = 8.dp, bottom = 20.dp),
+                        .padding(top = 4.dp, bottom = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -564,7 +563,7 @@ fun HomeScreen(
                     onUploadClick = { filePickerLauncher.launch("*/*") },
                     onNewFolderClick = { showCreateFolderDialog = true },
                     onSearchClick = { navController.navigateSingleTopRestore("files") },
-                    onDrivesClick = { navController.navigateSingleTopRestore("accounts") }
+                    onDrivesClick = { navController.navigateSingleTopRestore("settings") }
                 )
             }
 
@@ -693,7 +692,8 @@ fun StorageOverviewCard(
                     categories = StorageCategories()
                 )
 
-                // Top Row: "Storage" on left, "52 GB of 64 GB Used" on right
+                // Top Row: "Storage" on left, usage on right
+                val defaultAccount = accounts.firstOrNull { it.isDefault == true } ?: accounts.firstOrNull()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -722,6 +722,40 @@ fun StorageOverviewCard(
                                 modifier = Modifier.testTag("storage_refresh_error")
                             )
                         }
+                    }
+                }
+
+                if (defaultAccount != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = defaultAccount.effectiveName.take(1).uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Default: ${defaultAccount.effectiveName}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "${accounts.size} linked",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
 

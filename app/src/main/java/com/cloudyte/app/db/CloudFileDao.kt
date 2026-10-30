@@ -18,6 +18,9 @@ interface CloudFileDao {
     @Query("SELECT * FROM cloud_files WHERE (accountId = :accountId OR (:accountId IS NULL AND accountId IS NULL)) ORDER BY isFolder DESC, time DESC, name ASC")
     suspend fun getFilesForAccount(accountId: String?): List<LocalCloudFile>
 
+    @Query("SELECT * FROM cloud_files WHERE isFolder = 0 ORDER BY time DESC, updatedAt DESC, name ASC LIMIT :limit")
+    suspend fun getRecentFiles(limit: Int): List<LocalCloudFile>
+
     @Query("SELECT * FROM cloud_files WHERE (accountId = :accountId OR (:accountId IS NULL AND accountId IS NULL)) AND name LIKE '%' || :query || '%' ORDER BY isFolder DESC, name ASC")
     suspend fun searchFiles(accountId: String?, query: String): List<LocalCloudFile>
 
