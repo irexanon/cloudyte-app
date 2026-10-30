@@ -367,14 +367,21 @@ class BackupWorker(
                                 )
                             )
                         }
-                        transferRepository.saveResumeMetadata(
-                            id = transferId,
-                            sessionId = null,
-                            chunkSize = ResumableTransfer.DEFAULT_CHUNK_SIZE,
-                            nextChunkIndex = 0,
-                            checksum = null,
-                            idempotencyKey = ResumableTransfer.newIdempotencyKey(transferId)
-                        )
+                        // Keep the durable idempotency/session record when WorkManager
+                        // re-runs a failed file. The server uses this key to recover the
+                        // existing provider upload session and return its current offset.
+                        // Resetting it here would turn a resumable retry into a restart.
+                        if (existingTransfer == null || existingTransfer.idempotencyKey.isNullOrBlank()) {
+                            transferRepository.saveResumeMetadata(
+                                id = transferId,
+                                sessionId = existingTransfer?.providerSessionId,
+                                chunkSize = existingTransfer?.chunkSize?.takeIf { it > 0L }
+                                    ?: ResumableTransfer.DEFAULT_CHUNK_SIZE,
+                                nextChunkIndex = existingTransfer?.nextChunkIndex ?: 0,
+                                checksum = existingTransfer?.checksum,
+                                idempotencyKey = ResumableTransfer.newIdempotencyKey(transferId)
+                            )
+                        }
                         transferRepository.markRunning(transferId, fileSize)
                         SyncLogger.log("↑ [$processedFilesCount/$totalFilesToProcess] Uploading '$fileName' ($sizeFormatted)...", SyncLogLevel.INFO)
                         SyncLogger.updateStatus(

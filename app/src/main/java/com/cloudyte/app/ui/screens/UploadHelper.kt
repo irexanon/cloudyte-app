@@ -7,6 +7,9 @@ import android.provider.OpenableColumns
 import android.util.Log
 import android.webkit.MimeTypeMap
 import com.cloudyte.app.api.ApiClient
+import com.cloudyte.app.api.UploadSessionRequest
+import com.cloudyte.app.data.providers.CloudProvider
+import com.cloudyte.app.data.providers.CloudyteProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType
@@ -192,7 +195,8 @@ object UploadHelper {
         explicitFileName: String,
         explicitMimeType: String,
         explicitFileSize: Long,
-        idempotencyKey: String
+        idempotencyKey: String,
+        provider: CloudProvider = CloudyteProvider(ApiClient.apiService)
     ): UploadResult = withContext(Dispatchers.IO) {
         try {
             val resolver = context.contentResolver
@@ -208,7 +212,7 @@ object UploadHelper {
                 }
             } ?: throw IOException("Cannot open local file stream")
             val checksum = digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
-            val sessionResponse = ApiClient.apiService.createUploadSession(
+            val sessionResponse = provider.createUploadSession(
                 accountId,
                 UploadSessionRequest(
                     fileName = explicitFileName,
@@ -243,7 +247,7 @@ object UploadHelper {
                     }
                     val body = bytes.toRequestBody(explicitMimeType.toMediaTypeOrNull())
                     val part = MultipartBody.Part.createFormData("chunk", explicitFileName, body)
-                    val response = ApiClient.apiService.uploadChunk(
+                    val response = provider.uploadChunk(
                         sessionId = session.sessionId,
                         contentRange = "bytes $offset-${offset + readTotal - 1}/$totalBytes",
                         chunk = part
@@ -254,7 +258,7 @@ object UploadHelper {
                     offset = response.body()!!.nextOffset
                 }
             } ?: throw IOException("Cannot open local file stream")
-            val complete = ApiClient.apiService.completeUploadSession(session.sessionId)
+            val complete = provider.completeUploadSession(session.sessionId)
             if (complete.isSuccessful && complete.body()?.success == true) {
                 UploadResult(true, complete.code(), fileName = explicitFileName)
             } else {
