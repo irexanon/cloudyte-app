@@ -23,8 +23,14 @@ class TransferWorker(
             else -> return Result.failure()
         }
 
-        application.container.transferCoordinator.dispatch(command)
-        return Result.success()
+        return try {
+            application.container.transferCoordinator.dispatch(command)
+            Result.success()
+        } catch (error: Throwable) {
+            // Scheduling can fail transiently during process recreation or network recovery.
+            // Let WorkManager apply its configured backoff instead of losing the command.
+            Result.retry()
+        }
     }
 
     companion object {
