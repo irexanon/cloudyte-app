@@ -29,6 +29,7 @@ class UserPreferencesTest {
         assertEquals(ThemeMode.DARK, state.themeMode)
         assertEquals(ViewMode.GRID, state.viewMode)
         assertEquals(2, state.gridColumns)
+        assertFalse(state.showRecentFiles)
         assertTrue(state.backupWifiOnly)
     }
 
@@ -44,6 +45,15 @@ class UserPreferencesTest {
         assertEquals(ViewMode.LIST, state.viewMode)
         assertEquals(4, state.gridColumns)
         assertFalse(state.backupWifiOnly)
+    }
+
+    @Test
+    fun testShowRecentFilesTogglePersists() = runBlocking {
+        UserPreferences.setShowRecentFiles(context, true)
+        assertTrue(UserPreferences.observe(context).first().showRecentFiles)
+
+        UserPreferences.setShowRecentFiles(context, false)
+        assertFalse(UserPreferences.observe(context).first().showRecentFiles)
     }
 
     @Test

@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -69,13 +70,13 @@ fun GroupedList(
             val isLast = isVisible && visibleIndex == totalVisible - 1
 
             val topRadius by animateDpAsState(
-                targetValue = if (isFirst) 24.dp else 6.dp,
+                targetValue = if (isFirst) 16.dp else 0.dp,
                 animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                 label = "topCornerRadius"
             )
 
             val bottomRadius by animateDpAsState(
-                targetValue = if (isLast) 24.dp else 6.dp,
+                targetValue = if (isLast) 16.dp else 0.dp,
                 animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                 label = "bottomCornerRadius"
             )
@@ -99,7 +100,11 @@ fun GroupedList(
                         item.content()
                     }
                     if (visibleIndex in 0 until totalVisible - 1) {
-                        Spacer(modifier = Modifier.height(2.dp))
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+                            thickness = 0.5.dp
+                        )
                     }
                 }
             }

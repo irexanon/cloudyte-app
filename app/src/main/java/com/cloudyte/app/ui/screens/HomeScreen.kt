@@ -14,7 +14,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,28 +26,29 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,6 +56,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -106,14 +109,9 @@ import com.cloudyte.app.data.formatStorageUsageText
 import com.cloudyte.app.db.AppDatabase
 import com.cloudyte.app.db.LocalAccount
 import com.cloudyte.app.db.LocalCloudFile
-import com.cloudyte.app.ui.components.AppLoadingIndicator
 import com.cloudyte.app.ui.components.FileThumb
 import com.cloudyte.app.ui.components.LocalBottomBarInset
 import com.cloudyte.app.ui.openFileInViewer
-import com.cloudyte.app.ui.theme.BrandPrimary
-import com.cloudyte.app.ui.theme.ProviderGoogle
-import com.cloudyte.app.ui.theme.ProviderOneDrive
-import com.cloudyte.app.ui.theme.ProviderTelegram
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -168,10 +166,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         _accounts
     ) { preferredId, accs ->
         when {
-            !preferredId.isNullOrBlank() && (preferredId == ALL_ACCOUNTS_STORAGE_ID || accs.isEmpty() || accs.any { it.effectiveId == preferredId }) ->
+            !preferredId.isNullOrBlank() && preferredId != ALL_ACCOUNTS_STORAGE_ID && (accs.isEmpty() || accs.any { it.effectiveId == preferredId }) ->
                 preferredId
-            accs.size > 1 -> ALL_ACCOUNTS_STORAGE_ID
-            accs.size == 1 -> accs.first().effectiveId.ifBlank { ALL_ACCOUNTS_STORAGE_ID }
+            accs.isNotEmpty() -> (accs.firstOrNull { it.isDefault == true } ?: accs.first()).effectiveId.ifBlank { ALL_ACCOUNTS_STORAGE_ID }
             else -> ALL_ACCOUNTS_STORAGE_ID
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ALL_ACCOUNTS_STORAGE_ID)
@@ -301,6 +298,16 @@ fun HomeScreen(
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val app = remember(context) { context.applicationContext as com.cloudyte.app.CloudyteApplication }
+    val activeTransfers by app.container.transferRepository.observeActive().collectAsStateWithLifecycle(initialValue = emptyList())
+    val dashboardAccountId = selectedStorageAccountId.takeIf { it != ALL_ACCOUNTS_STORAGE_ID } ?: currentAccountId
+    val hasActiveUpload = activeTransfers.any {
+        it.direction == com.cloudyte.app.db.TransferDirection.UPLOAD.name &&
+            it.accountId == dashboardAccountId &&
+            it.status in setOf("PENDING", "RUNNING")
+    }
+    val prefsState by UserPreferences.observe(context).collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
     var isUploading by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var folderNameInput by remember { mutableStateOf("") }
@@ -313,7 +320,9 @@ fun HomeScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            val accId = currentAccountId ?: accounts.firstOrNull()?.effectiveId
+            val accId = selectedStorageAccountId.takeIf { id -> id != ALL_ACCOUNTS_STORAGE_ID }
+                ?: currentAccountId
+                ?: accounts.firstOrNull()?.effectiveId
             if (!accId.isNullOrEmpty()) {
                 isUploading = true
                 coroutineScope.launch {
@@ -331,22 +340,32 @@ fun HomeScreen(
                                 if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
                             }
                         }
-                        val app = context.applicationContext as com.cloudyte.app.CloudyteApplication
                         val transferId = app.container.transferRepository.enqueueTransfer(
                             accountId = accId,
                             fileName = name,
                             localPath = it.toString(),
+                            remotePath = "root",
                             direction = com.cloudyte.app.db.TransferDirection.UPLOAD,
                             totalBytes = size
                         )
                         app.container.transferCoordinator.dispatch(com.cloudyte.app.core.transfer.TransferCommand.Start(transferId))
-                        android.widget.Toast.makeText(context, "$name added to transfers", android.widget.Toast.LENGTH_SHORT).show()
+                        isUploading = false
+                        val result = snackbarHostState.showSnackbar(
+                            message = "$name added to Transfers",
+                            actionLabel = "View",
+                            withDismissAction = true
+                        )
+                        if (result == SnackbarResult.ActionPerformed) {
+                            navController.navigateSingleTopRestore("transfers")
+                        }
                     } catch (error: Exception) {
-                        android.widget.Toast.makeText(context, error.message ?: "Could not queue upload", android.widget.Toast.LENGTH_LONG).show()
+                        snackbarHostState.showSnackbar(error.message ?: "Could not queue upload")
                     } finally {
                         isUploading = false
                     }
                 }
+            } else {
+                coroutineScope.launch { snackbarHostState.showSnackbar("Connect a drive before uploading") }
             }
         }
     }
@@ -426,40 +445,7 @@ fun HomeScreen(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        floatingActionButton = {
-            if (isUploading) {
-                FloatingActionButton(
-                    onClick = { },
-                    shape = RoundedCornerShape(18.dp),
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .padding(bottom = LocalBottomBarInset.current)
-                        .size(56.dp)
-                ) {
-                    AppLoadingIndicator(
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        size = 24.dp
-                    )
-                }
-            } else {
-                FloatingActionButton(
-                    onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
-                    shape = RoundedCornerShape(18.dp),
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier
-                        .padding(bottom = LocalBottomBarInset.current)
-                        .size(56.dp)
-                        .testTag("home_upload_fab")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = stringResource(R.string.action_upload_file),
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
-        }
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
@@ -469,7 +455,7 @@ fun HomeScreen(
                 start = 20.dp,
                 end = 20.dp,
                 top = 12.dp,
-                bottom = LocalBottomBarInset.current + 88.dp
+                bottom = LocalBottomBarInset.current + 24.dp
             )
         ) {
             // Original Dashboard Header: Welcome Back + Username + Multi-cloud drive manager + Refresh button
@@ -504,16 +490,21 @@ fun HomeScreen(
                             fontSize = 14.sp
                         )
                     }
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .clickable { viewModel.loadData(forceStorageRefresh = true) }
-                            .testTag("home_refresh_button")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = { navController.navigateSingleTopRestore("settings") },
+                            modifier = Modifier.testTag("home_settings_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = stringResource(R.string.nav_settings),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(
+                            onClick = { viewModel.loadData(forceStorageRefresh = true) },
+                            modifier = Modifier.testTag("home_refresh_button")
+                        ) {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
                                 contentDescription = stringResource(R.string.action_refresh),
@@ -585,13 +576,14 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(16.dp))
                 QuickActionsRow(
                     onUploadClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+                    isUploadBusy = isUploading || hasActiveUpload,
                     onNewFolderClick = { showCreateFolderDialog = true },
                     onSearchClick = { navController.navigateSingleTopRestore("files") },
-                    onDrivesClick = { navController.navigateSingleTopRestore("settings") }
+                    onDrivesClick = { navController.navigateSingleTopRestore("accounts") }
                 )
             }
 
-            if (recentFiles.isNotEmpty()) {
+            if (prefsState.showRecentFiles && recentFiles.isNotEmpty()) {
                 item {
                     Spacer(modifier = Modifier.height(28.dp))
                     Text(
@@ -720,6 +712,8 @@ fun StorageOverviewCard(
 
                 // Top Row: "Storage" on left, usage on right
                 val defaultAccount = accounts.firstOrNull { it.isDefault == true } ?: accounts.firstOrNull()
+                val selectedAccount = accounts.firstOrNull { it.effectiveId == selectedAccountId } ?: defaultAccount
+                var accountMenuExpanded by remember { mutableStateOf(false) }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -751,48 +745,76 @@ fun StorageOverviewCard(
                     }
                 }
 
-                if (defaultAccount != null) {
+                if (selectedAccount != null) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(enabled = accounts.size > 1) { accountMenuExpanded = true }
+                            .testTag("storage_account_selector")
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Box(
                             modifier = Modifier
-                                .size(24.dp)
+                                .size(32.dp)
                                 .clip(CircleShape)
                                 .background(MaterialTheme.colorScheme.primaryContainer),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = defaultAccount.effectiveName.take(1).uppercase(),
+                                text = selectedAccount.effectiveName.take(1).uppercase(),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Default: ${defaultAccount.effectiveName}",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = "${accounts.size} linked",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = selectedAccount.effectiveName,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (selectedAccount.isDefault == true) "Default account" else selectedAccount.effectiveType,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (accounts.size > 1) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Choose account",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            DropdownMenu(
+                                expanded = accountMenuExpanded,
+                                onDismissRequest = { accountMenuExpanded = false }
+                            ) {
+                                accounts.forEach { account ->
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = account.effectiveName + if (account.isDefault == true) " · Default" else "",
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        },
+                                        onClick = {
+                                            onSelectAccount(account.effectiveId)
+                                            accountMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
-                }
-
-                // Account Switcher Chip Row (shown when user has multiple drives)
-                if (accounts.size > 1) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    StorageAccountChipRow(
-                        accounts = accounts,
-                        selectedAccountId = selectedAccountId,
-                        onSelectAccount = onSelectAccount
-                    )
                 }
 
                 val effectiveCategories = activeSummary.categories ?: deriveCategoriesFromFiles(emptyList(), activeSummary.usedBytes)
@@ -920,7 +942,7 @@ fun StorageOverviewCard(
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "${activeSummary.fileCount ?: accounts.sumOf { it.fileCount ?: 0 }}",
+                                text = "${activeSummary.fileCount ?: selectedAccount?.fileCount ?: defaultAccount?.fileCount ?: 0}",
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -943,106 +965,6 @@ fun StorageOverviewCard(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun StorageAccountChipRow(
-    accounts: List<Account>,
-    selectedAccountId: String,
-    onSelectAccount: (String) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .testTag("storage_account_chips"),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        StorageAccountChip(
-            label = "All accounts",
-            avatarLetter = "A",
-            avatarColor = BrandPrimary,
-            selected = selectedAccountId == ALL_ACCOUNTS_STORAGE_ID,
-            onClick = { onSelectAccount(ALL_ACCOUNTS_STORAGE_ID) },
-            testTag = "storage_chip_all"
-        )
-        accounts.forEach { account ->
-            val accId = account.effectiveId
-            val pColor = when {
-                account.effectiveType.contains("google", ignoreCase = true) ||
-                    account.effectiveType.contains("gdrive", ignoreCase = true) -> ProviderGoogle
-                account.effectiveType.contains("onedrive", ignoreCase = true) -> ProviderOneDrive
-                else -> ProviderTelegram
-            }
-            StorageAccountChip(
-                label = account.effectiveName,
-                avatarLetter = account.effectiveName.take(1).uppercase(),
-                avatarColor = pColor,
-                selected = selectedAccountId == accId,
-                onClick = { onSelectAccount(accId) },
-                testTag = "storage_chip_$accId"
-            )
-        }
-    }
-}
-
-@Composable
-private fun StorageAccountChip(
-    label: String,
-    avatarLetter: String,
-    avatarColor: Color,
-    selected: Boolean,
-    onClick: () -> Unit,
-    testTag: String
-) {
-    val bgColor = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-    }
-    val textColor = if (selected) {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Surface(
-        shape = CircleShape,
-        color = bgColor,
-        modifier = Modifier
-            .clip(CircleShape)
-            .clickable(onClick = onClick)
-            .testTag(testTag)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(18.dp)
-                    .background(avatarColor, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = avatarLetter,
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            Text(
-                text = label,
-                fontSize = 12.sp,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                color = textColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
     }
 }
@@ -1162,6 +1084,7 @@ private fun categoryColor(category: StorageCategoryType): Color = when (category
 @Composable
 fun QuickActionsRow(
     onUploadClick: () -> Unit,
+    isUploadBusy: Boolean = false,
     onNewFolderClick: () -> Unit,
     onSearchClick: () -> Unit,
     onDrivesClick: () -> Unit
@@ -1170,7 +1093,12 @@ fun QuickActionsRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        QuickActionButton(Icons.Default.Upload, stringResource(R.string.action_upload), onUploadClick)
+        QuickActionButton(
+            Icons.Default.Upload,
+            if (isUploadBusy) "Uploading…" else stringResource(R.string.action_upload),
+            onUploadClick,
+            isLoading = isUploadBusy
+        )
         QuickActionButton(Icons.Default.CreateNewFolder, stringResource(R.string.action_new_folder), onNewFolderClick)
         QuickActionButton(Icons.Default.Search, stringResource(R.string.action_search), onSearchClick)
         QuickActionButton(Icons.Default.Cloud, stringResource(R.string.action_drives), onDrivesClick)
@@ -1178,23 +1106,32 @@ fun QuickActionsRow(
 }
 
 @Composable
-fun QuickActionButton(icon: ImageVector, label: String, onClick: () -> Unit) {
+fun QuickActionButton(icon: ImageVector, label: String, onClick: () -> Unit, isLoading: Boolean = false) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable(onClick = onClick)
+        modifier = Modifier.clickable(enabled = !isLoading, onClick = onClick)
     ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            modifier = Modifier.size(60.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(26.dp)
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(64.dp)) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(64.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = 2.dp
                 )
+            }
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                modifier = Modifier.size(56.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = label,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
             }
         }
         Spacer(modifier = Modifier.height(10.dp))

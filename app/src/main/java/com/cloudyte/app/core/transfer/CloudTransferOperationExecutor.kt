@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.cloudyte.app.api.ApiClient
 import com.cloudyte.app.data.TransferRepository
+import com.cloudyte.app.data.CloudFileRepository
 import com.cloudyte.app.data.providers.CloudProvider
 import com.cloudyte.app.data.providers.ProviderRegistry
 import com.cloudyte.app.data.providers.UnsupportedProviderOperation
@@ -32,6 +33,14 @@ class CloudTransferOperationExecutor(
     private val providers: ProviderRegistry
 ) : TransferOperationExecutor {
     override suspend fun onCompleted(transfer: LocalTransfer) {
+        if (transfer.direction != TransferDirection.DOWNLOAD.name) {
+            val folderId = transfer.parentFolderId?.takeIf { it.isNotBlank() }
+                ?: transfer.remotePath?.takeIf { it.isNotBlank() }
+                ?: "root"
+            val repository = CloudFileRepository(database, ApiClient.apiService)
+            runCatching { repository.refresh(transfer.accountId, folderId, force = true) }
+            runCatching { repository.refreshStorage(transfer.accountId, force = true) }
+        }
         val uri = Uri.parse(transfer.localUri ?: return)
         if (uri.scheme != "file") return
         val file = File(uri.path ?: return)
@@ -466,4 +475,3 @@ class CloudTransferOperationExecutor(
         catch (_: Exception) { -1L }
     }
 }
-

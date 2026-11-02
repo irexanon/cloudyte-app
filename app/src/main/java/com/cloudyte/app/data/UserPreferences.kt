@@ -52,7 +52,7 @@ data class UserPreferencesState(
     val viewMode: ViewMode = ViewMode.GRID,
     val gridColumns: Int = 2,
     val layoutDensity: String = "COMFORTABLE",
-    val showRecentFiles: Boolean = true,
+    val showRecentFiles: Boolean = false,
     val sortField: SortField = SortField.DATE,
     val sortDirection: SortDirection = SortDirection.DESC,
     val showHidden: Boolean = false,
@@ -204,7 +204,7 @@ object UserPreferences {
                 } ?: ViewMode.GRID,
                 gridColumns = (prefs[KEY_GRID_COLUMNS] ?: 2).coerceIn(2, 5),
                 layoutDensity = prefs[KEY_LAYOUT_DENSITY] ?: "COMFORTABLE",
-                showRecentFiles = prefs[KEY_SHOW_RECENT_FILES] ?: true,
+                showRecentFiles = prefs[KEY_SHOW_RECENT_FILES] ?: false,
                 sortField = prefs[KEY_SORT_FIELD]?.let {
                     runCatching { SortField.valueOf(it) }.getOrNull()
                 } ?: SortField.DATE,
