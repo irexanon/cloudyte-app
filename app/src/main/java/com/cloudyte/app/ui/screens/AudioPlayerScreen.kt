@@ -3,24 +3,76 @@ package com.cloudyte.app.ui.screens
 import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.animation.core.*
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Replay10
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
@@ -35,19 +87,28 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.navigation.NavController
+import com.cloudyte.app.CloudyteApplication
 import com.cloudyte.app.api.ApiClient
+import com.cloudyte.app.api.CloudFile
 import com.cloudyte.app.api.FileRepository
 import com.cloudyte.app.api.OfflineFileManager
+import com.cloudyte.app.core.cache.PreviewFetcher
+import com.cloudyte.app.data.FileCryptoActions
 import com.cloudyte.app.data.UserPreferences
 import com.cloudyte.app.data.UserPreferencesState
 import com.cloudyte.app.features.player.AudioPlaybackService
-import com.cloudyte.app.ui.theme.*
+import com.cloudyte.app.features.player.GDriveActionsBottomSheet
+import com.cloudyte.app.features.player.GDriveDeleteConfirmDialog
+import com.cloudyte.app.features.player.GDriveInfoBottomSheet
+import com.cloudyte.app.features.player.GDriveRenameDialog
+import com.cloudyte.app.features.player.performInAppDownload
+import com.cloudyte.app.features.player.performShareFileLink
+import com.cloudyte.app.ui.theme.MetricLabelTextStyle
+import com.cloudyte.app.ui.theme.MetricTextStyle
 import com.google.common.util.concurrent.ListenableFuture
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, UnstableApi::class)
@@ -59,27 +120,33 @@ fun AudioPlayerScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val file = remember(fileId) { FileRepository.getFile(fileId) }
-    val fileName = file?.effectiveName ?: "Audio Track"
+    val app = context.applicationContext as? CloudyteApplication
 
-    val effectiveAccId = remember(accountId, file?.effectiveAccountId) {
-        when {
-            file?.effectiveAccountId?.isNotBlank() == true -> file.effectiveAccountId
-            accountId.isNotBlank() && accountId != "all" && accountId != "root" -> accountId
-            else -> ""
+    var dbFile by remember(fileId) { mutableStateOf<CloudFile?>(null) }
+    LaunchedEffect(fileId) {
+        if (app != null) {
+            val local = app.container.database.cloudFileDao().getFileById(fileId)?.toCloudFile()
+            if (local != null) {
+                FileRepository.cacheFiles(listOf(local))
+                dbFile = local
+            }
         }
     }
+    val file = remember(fileId, dbFile) { FileRepository.getFile(fileId) ?: dbFile }
+    val fileName = file?.effectiveName ?: "Audio Track"
+
+    val effectiveAccId = file?.effectiveAccountId?.takeIf { it.isNotBlank() }
+        ?: accountId.takeIf { it.isNotBlank() && it != "all" && it != "root" }.orEmpty()
 
     val audioUrl = remember(effectiveAccId, fileId) {
         val acc = effectiveAccId.ifBlank { accountId }
-        ApiClient.getFileUrl(acc, fileId, preview = true)
+        ApiClient.getCleanDownloadUrl(acc, fileId, preview = true)
     }
 
     val prefsState by UserPreferences.observe(context).collectAsState(initial = UserPreferencesState())
-    val initialPrefs = remember {
-        kotlinx.coroutines.runBlocking {
-            runCatching { UserPreferences.observe(context).first() }.getOrDefault(UserPreferencesState())
-        }
+    var resolvedPrefs by remember { mutableStateOf<UserPreferencesState?>(null) }
+    LaunchedEffect(Unit) {
+        resolvedPrefs = runCatching { UserPreferences.observe(context).first() }.getOrDefault(UserPreferencesState())
     }
 
     var activePlayer by remember { mutableStateOf<Player?>(null) }
@@ -92,31 +159,42 @@ fun AudioPlayerScreen(
     var isLooping by remember { mutableStateOf(false) }
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
     var showSpeedDialog by remember { mutableStateOf(false) }
-    var attemptedDownloadFallback by remember(fileId) { mutableStateOf(false) }
+    var attemptedPreviewFallback by remember(fileId) { mutableStateOf(false) }
+
+    var showActionsSheet by remember { mutableStateOf(false) }
+    var showInfoSheet by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showMoveCopyDialog by remember { mutableStateOf(false) }
+    var isMoveAction by remember { mutableStateOf(true) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    var snackbarMsg by remember { mutableStateOf<String?>(null) }
+    val downloadedIds by OfflineFileManager.downloadedFiles.collectAsState()
+
+    LaunchedEffect(snackbarMsg) {
+        snackbarMsg?.let {
+            snackbarHostState.showSnackbar(it)
+            snackbarMsg = null
+        }
+    }
 
     fun createLocalPlayer(): ExoPlayer {
-        val token = ApiClient.getToken()
-        val headers = mutableMapOf<String, String>()
-        if (!token.isNullOrEmpty()) {
-            headers["Authorization"] = "Bearer $token"
-        }
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setDefaultRequestProperties(headers)
-            .setAllowCrossProtocolRedirects(true)
-        val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
-
         return ExoPlayer.Builder(context)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setMediaSourceFactory(com.cloudyte.app.features.player.MediaStreamCache.createMediaSourceFactory(context))
+            .setLoadControl(com.cloudyte.app.features.player.MediaStreamCache.createFastLoadControl())
             .build()
     }
 
-    // Bind MediaController to AudioPlaybackService when backgroundPlayback is enabled;
-    // otherwise use a screen-scoped ExoPlayer released on dispose.
-    DisposableEffect(initialPrefs.backgroundPlayback) {
+    val backgroundPlaybackSetting = resolvedPrefs?.backgroundPlayback
+    DisposableEffect(backgroundPlaybackSetting) {
+        if (backgroundPlaybackSetting == null) {
+            return@DisposableEffect onDispose {}
+        }
         var controllerFuture: ListenableFuture<MediaController>? = null
         var boundPlayer: Player? = null
 
-        if (initialPrefs.backgroundPlayback) {
+        if (backgroundPlaybackSetting) {
             try {
                 val token = SessionToken(context, ComponentName(context, AudioPlaybackService::class.java))
                 val future = MediaController.Builder(context, token).buildAsync()
@@ -163,48 +241,35 @@ fun AudioPlayerScreen(
         }
     }
 
-    // Load media item honoring streamBeforeDownload and offline/encryption requirements
-    LaunchedEffect(activePlayer, fileId, effectiveAccId, file?.isEncrypted, initialPrefs.streamBeforeDownload) {
+    LaunchedEffect(activePlayer, fileId, effectiveAccId, file?.isEncrypted, resolvedPrefs) {
         val player = activePlayer ?: return@LaunchedEffect
-        val acc = effectiveAccId.ifBlank { accountId }
+        val prefs = resolvedPrefs ?: return@LaunchedEffect
+        val streamBeforeDownload = prefs.streamBeforeDownload
+        val acc = PreviewFetcher.resolveAccountId(context, effectiveAccId.ifBlank { accountId }, file)
         val metadata = MediaMetadata.Builder()
             .setTitle(fileName)
             .setArtist("Cloudyte")
             .build()
 
-        val mediaUri: Uri? = if (file?.isEncrypted == true) {
+        val mediaUri: Uri? = if (file?.isEncrypted == true || !streamBeforeDownload) {
             isBuffering = true
-            statusNote = "Decrypting encrypted audio…"
-            val decrypted = withContext(Dispatchers.IO) {
-                OfflineFileManager.prepareDecryptedFileForViewer(context, acc, file).getOrNull()
+            statusNote = if (file?.isEncrypted == true) "Decrypting audio…" else "Preparing audio preview…"
+            val ready = file?.let {
+                PreviewFetcher.resolvePreviewFile(context, acc, it).getOrNull()
             }
             statusNote = null
-            decrypted?.takeIf { it.exists() && it.length() > 0 }?.let { Uri.fromFile(it) }
-        } else {
-            val existingOffline = withContext(Dispatchers.IO) {
-                OfflineFileManager.findOfflineFile(context, acc, fileId)
+            when {
+                ready != null && ready.isFile && ready.length() > 0L -> Uri.fromFile(ready)
+                file?.isEncrypted == true -> null
+                else -> Uri.parse(audioUrl)
             }
-            if (existingOffline != null && existingOffline.exists() && existingOffline.length() > 0) {
-                statusNote = "Playing from offline storage"
-                Uri.fromFile(existingOffline)
-            } else if (!initialPrefs.streamBeforeDownload && file != null && acc.isNotBlank()) {
-                isBuffering = true
-                statusNote = "Downloading before playback…"
-                val downloaded = withContext(Dispatchers.IO) {
-                    OfflineFileManager.downloadFile(context, acc, file).getOrNull()
-                }
-                if (downloaded != null && downloaded.exists() && downloaded.length() > 0) {
-                    statusNote = "Downloaded locally"
-                    Uri.fromFile(downloaded)
-                } else {
-                    statusNote = "Local download failed; streaming instead"
-                    Uri.parse(audioUrl)
-                }
+        } else {
+            val cached = file?.let { PreviewFetcher.resolveCachedOnly(context, acc, it) }
+            if (cached != null) {
+                statusNote = null
+                Uri.fromFile(cached)
             } else {
                 statusNote = null
-                if (acc.isNotBlank() && acc != "all" && acc != "root" && file != null) {
-                    OfflineFileManager.autoCacheOnView(context, acc, file)
-                }
                 Uri.parse(audioUrl)
             }
         }
@@ -239,24 +304,20 @@ fun AudioPlayerScreen(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                if (!attemptedDownloadFallback && file != null && !file.isEncrypted) {
-                    attemptedDownloadFallback = true
-                    val acc = effectiveAccId.ifBlank { accountId }
-                    if (acc.isNotBlank()) {
-                        scope.launch {
-                            statusNote = "Stream failed; downloading locally…"
-                            val downloaded = withContext(Dispatchers.IO) {
-                                OfflineFileManager.downloadFile(context, acc, file).getOrNull()
-                            }
-                            if (downloaded != null && downloaded.exists() && downloaded.length() > 0) {
-                                statusNote = "Playing local copy"
-                                player.setMediaItem(MediaItem.fromUri(Uri.fromFile(downloaded)))
-                                player.prepare()
-                                player.playWhenReady = true
-                            } else {
-                                isBuffering = false
-                                statusNote = error.localizedMessage ?: "Audio playback failed"
-                            }
+                if (!attemptedPreviewFallback && file != null && !file.isEncrypted) {
+                    attemptedPreviewFallback = true
+                    scope.launch {
+                        val acc = PreviewFetcher.resolveAccountId(context, effectiveAccId.ifBlank { accountId }, file)
+                        statusNote = "Buffering audio preview…"
+                        val ready = PreviewFetcher.resolvePreviewFile(context, acc, file).getOrNull()
+                        if (ready != null && ready.isFile && ready.length() > 0L) {
+                            statusNote = null
+                            player.setMediaItem(MediaItem.fromUri(Uri.fromFile(ready)))
+                            player.prepare()
+                            player.playWhenReady = true
+                        } else {
+                            isBuffering = false
+                            statusNote = error.localizedMessage ?: "Audio playback failed"
                         }
                     }
                 } else {
@@ -275,7 +336,6 @@ fun AudioPlayerScreen(
         }
     }
 
-    // Position tracker
     LaunchedEffect(activePlayer, isPlaying) {
         val player = activePlayer ?: return@LaunchedEffect
         while (isPlaying) {
@@ -340,21 +400,130 @@ fun AudioPlayerScreen(
         )
     }
 
+    if (showMoveCopyDialog && file != null) {
+        MoveCopyDialog(
+            file = file,
+            sourceAccountId = effectiveAccId.ifBlank { accountId },
+            isMove = isMoveAction,
+            onDismiss = { showMoveCopyDialog = false },
+            onSuccess = { msg ->
+                showMoveCopyDialog = false
+                snackbarMsg = msg
+            }
+        )
+    }
+
+    if (showInfoSheet && file != null) {
+        GDriveInfoBottomSheet(
+            file = file,
+            accountId = effectiveAccId,
+            isDownloadedOffline = fileId in downloadedIds,
+            context = context,
+            onDismiss = { showInfoSheet = false }
+        )
+    }
+
+    if (showActionsSheet && file != null) {
+        GDriveActionsBottomSheet(
+            file = file,
+            accountId = effectiveAccId,
+            isDownloadedOffline = fileId in downloadedIds,
+            onDismiss = { showActionsSheet = false },
+            onShare = {
+                scope.launch {
+                    val err = performShareFileLink(context, effectiveAccId, file)
+                    if (!err.isNullOrBlank()) snackbarMsg = err
+                }
+            },
+            onDownload = {
+                scope.launch {
+                    snackbarMsg = performInAppDownload(context, effectiveAccId, file)
+                }
+            },
+            onOpenDetails = {
+                val navAcc = effectiveAccId.ifBlank { accountId }
+                navController.navigate("file_detail/$navAcc/$fileId")
+            },
+            onRename = { showRenameDialog = true },
+            onMove = {
+                isMoveAction = true
+                showMoveCopyDialog = true
+            },
+            onCopy = {
+                isMoveAction = false
+                showMoveCopyDialog = true
+            },
+            onEncryptCopy = if (!file.isEncrypted && app != null) {
+                {
+                    scope.launch {
+                        snackbarMsg = FileCryptoActions.createEncryptedCopy(
+                            context = context,
+                            accountId = effectiveAccId,
+                            targetFile = file,
+                            fallbackParentFolderId = null,
+                            cloudFileRepository = app.container.cloudFileRepository,
+                            transferRepository = app.container.transferRepository,
+                            transferCoordinator = app.container.transferCoordinator
+                        )
+                    }
+                }
+            } else null,
+            onDelete = { showDeleteDialog = true }
+        )
+    }
+
+    if (showRenameDialog && file != null && app != null) {
+        GDriveRenameDialog(
+            initialName = file.effectiveName,
+            onDismiss = { showRenameDialog = false },
+            onConfirm = { newName ->
+                showRenameDialog = false
+                scope.launch {
+                    val res = app.container.cloudFileRepository.rename(fileId, effectiveAccId.ifBlank { null }, newName)
+                    snackbarMsg = if (res.isSuccess) "Renamed to $newName" else (res.exceptionOrNull()?.message ?: "Rename failed")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDialog && file != null && app != null) {
+        GDriveDeleteConfirmDialog(
+            fileName = file.effectiveName,
+            onDismiss = { showDeleteDialog = false },
+            onConfirm = {
+                showDeleteDialog = false
+                scope.launch {
+                    val res = app.container.cloudFileRepository.delete(fileId, effectiveAccId.ifBlank { null })
+                    if (res.isSuccess) navController.popBackStack()
+                    else snackbarMsg = res.exceptionOrNull()?.message ?: "Delete failed"
+                }
+            }
+        )
+    }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.navigationBarsPadding()
+            )
+        },
         topBar = {
             TopAppBar(
                 title = {
                     Column {
                         Text(
-                            "Audio Player",
+                            text = fileName,
                             color = MaterialTheme.colorScheme.onBackground,
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         if (prefsState.backgroundPlayback) {
                             Text(
-                                "Background playback active",
+                                text = "Background playback active",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.labelSmall
                             )
@@ -362,33 +531,42 @@ fun AudioPlayerScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    IconButton(
+                        onClick = { navController.popBackStack() },
+                        modifier = Modifier.testTag("viewer_back_button")
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onBackground)
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        if (file?.isEncrypted == true) {
-                            android.widget.Toast.makeText(context, "Encrypted sharing is not supported", android.widget.Toast.LENGTH_SHORT).show()
-                        } else {
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_TEXT, audioUrl)
-                            }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share Audio Link"))
+                    if (file != null) {
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    snackbarMsg = performInAppDownload(context, effectiveAccId, file)
+                                }
+                            },
+                            modifier = Modifier.testTag("viewer_download_button")
+                        ) {
+                            val saved = fileId in downloadedIds
+                            Icon(
+                                imageVector = if (saved) Icons.Default.DownloadDone else Icons.Default.Download,
+                                contentDescription = if (saved) "Saved offline" else "Download",
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
                         }
-                    }) {
-                        Icon(Icons.Default.Share, contentDescription = "Share", tint = MaterialTheme.colorScheme.onBackground)
-                    }
-                    IconButton(onClick = {
-                        if (file?.isEncrypted == true) {
-                            navController.navigate("file_detail/$accountId/$fileId")
-                        } else {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(audioUrl))
-                            context.startActivity(intent)
+                        IconButton(
+                            onClick = { showInfoSheet = true },
+                            modifier = Modifier.testTag("viewer_info_button")
+                        ) {
+                            Icon(Icons.Outlined.Info, contentDescription = "Details & Info", tint = MaterialTheme.colorScheme.onBackground)
                         }
-                    }) {
-                        Icon(Icons.Default.Download, contentDescription = "Download", tint = MaterialTheme.colorScheme.onBackground)
+                        IconButton(
+                            onClick = { showActionsSheet = true },
+                            modifier = Modifier.testTag("viewer_more_button")
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = MaterialTheme.colorScheme.onBackground)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background)
@@ -463,7 +641,8 @@ fun AudioPlayerScreen(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     textAlign = TextAlign.Center,
-                    maxLines = 2
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -537,7 +716,8 @@ fun AudioPlayerScreen(
                     onClick = {
                         isLooping = !isLooping
                         activePlayer?.repeatMode = if (isLooping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
-                    }
+                    },
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         Icons.Default.Repeat,
@@ -569,10 +749,8 @@ fun AudioPlayerScreen(
                     },
                     modifier = Modifier
                         .size(72.dp)
-                        .background(
-                            Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary)),
-                            CircleShape
-                        )
+                        .background(MaterialTheme.colorScheme.primary, CircleShape)
+                        .testTag("audio_play_pause_button")
                 ) {
                     if (isBuffering) {
                         com.cloudyte.app.ui.components.AppLoadingIndicator(size = 32.dp, color = MaterialTheme.colorScheme.onPrimary)
@@ -599,7 +777,10 @@ fun AudioPlayerScreen(
                     Icon(Icons.Default.Forward10, contentDescription = "Forward 10s", tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.size(32.dp))
                 }
 
-                IconButton(onClick = { showSpeedDialog = true }) {
+                IconButton(
+                    onClick = { showSpeedDialog = true },
+                    modifier = Modifier.size(48.dp)
+                ) {
                     Text(
                         text = if (playbackSpeed == 1f) "1x" else "${playbackSpeed}x",
                         color = MaterialTheme.colorScheme.onBackground,

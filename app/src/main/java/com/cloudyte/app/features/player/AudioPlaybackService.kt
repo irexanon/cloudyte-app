@@ -20,23 +20,14 @@ class AudioPlaybackService : MediaSessionService() {
     @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
-        val token = ApiClient.getToken()
-        val headers = mutableMapOf<String, String>()
-        if (!token.isNullOrEmpty()) {
-            headers["Authorization"] = "Bearer $token"
-        }
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setDefaultRequestProperties(headers)
-            .setAllowCrossProtocolRedirects(true)
-        val dataSourceFactory = DefaultDataSource.Factory(this, httpFactory)
-
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(C.USAGE_MEDIA)
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
 
         val player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            .setMediaSourceFactory(MediaStreamCache.createMediaSourceFactory(this))
+            .setLoadControl(MediaStreamCache.createFastLoadControl())
             .setAudioAttributes(audioAttributes, true)
             .setHandleAudioBecomingNoisy(true)
             .build()

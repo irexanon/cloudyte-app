@@ -79,7 +79,7 @@ fun FloatingNavigationBar(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 10.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp)
                 .testTag("floating_bottom_bar"),
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -89,10 +89,10 @@ fun FloatingNavigationBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(62.dp)
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                    .height(60.dp)
+                    .padding(horizontal = 5.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 items.forEachIndexed { index, item ->
                     val isSelected = index == selectedIndex
@@ -129,21 +129,21 @@ fun FloatingNavigationBar(
                         if (isSelected) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier.padding(horizontal = 12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 6.dp)
                             ) {
                                 Icon(
                                     imageVector = item.icon,
                                     contentDescription = item.label,
                                     tint = MaterialTheme.colorScheme.onPrimary,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                                 if (showNavText) {
                                     Text(
                                         text = item.label,
                                         color = MaterialTheme.colorScheme.onPrimary,
-                                        fontSize = 13.sp,
-                                        lineHeight = 16.sp,
+                                        fontSize = 12.sp,
+                                        lineHeight = 15.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         softWrap = false,
@@ -155,13 +155,13 @@ fun FloatingNavigationBar(
                             Text(
                                 text = item.label,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 13.sp,
-                                lineHeight = 16.sp,
+                                fontSize = 12.sp,
+                                lineHeight = 15.sp,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 8.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp)
                             )
                         } else {
                             Icon(

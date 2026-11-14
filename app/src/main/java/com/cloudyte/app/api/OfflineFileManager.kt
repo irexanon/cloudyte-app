@@ -141,20 +141,10 @@ object OfflineFileManager {
         _downloadedFiles.value = set
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun autoCacheOnView(context: Context, accountId: String, file: CloudFile) {
-        val fid = file.effectiveId
-        if (fid.isEmpty() || file.isFolderItem) return
-        if (isDownloaded(context, accountId, fid) || downloadingSet.contains(fid)) {
-            return
-        }
-
-        scope.launch {
-            try {
-                downloadFile(context, accountId, file)
-            } catch (e: Exception) {
-                Log.w(TAG, "Auto cache on view failed: ${e::class.simpleName}")
-            }
-        }
+        // Browsing/opening files uses ephemeral PreviewStore/Coil/ExoPlayer caches rather than
+        // creating persistent TransferDao download rows or triggering ActiveTransferPill popups.
     }
 
     suspend fun downloadFile(

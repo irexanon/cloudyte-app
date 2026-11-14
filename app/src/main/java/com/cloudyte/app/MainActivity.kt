@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
         val imageLoader = ImageLoader.Builder(this)
             .okHttpClient(ApiClient.okHttpClient)
             .crossfade(150)
-            .respectCacheHeaders(true)
+            .respectCacheHeaders(false)
             .memoryCache {
                 MemoryCache.Builder(this)
                     .maxSizePercent(0.25)

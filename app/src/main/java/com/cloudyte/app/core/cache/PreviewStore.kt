@@ -19,6 +19,26 @@ class PreviewStore(context: Context) {
         }
     }
 
+    fun createTempFile(key: String): File {
+        val safe = safeName(key)
+        return File(root, ".${safe}.${System.nanoTime()}.tmp")
+    }
+
+    suspend fun commitTempFile(key: String, temp: File): File = withContext(Dispatchers.IO) {
+        val safe = safeName(key)
+        val target = File(root, safe)
+        if (target.exists()) target.delete()
+        if (!temp.renameTo(target)) {
+            temp.copyTo(target, overwrite = true)
+            temp.delete()
+        }
+        check(target.exists() && target.length() > 0L) { "Unable to commit preview cache entry" }
+        val now = System.currentTimeMillis()
+        accessTimestamps[target.name] = now
+        target.setLastModified(now)
+        target
+    }
+
     suspend fun put(key: String, bytes: ByteArray): File = withContext(Dispatchers.IO) {
         val safe = safeName(key)
         val target = File(root, safe)

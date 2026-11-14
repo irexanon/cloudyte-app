@@ -3,42 +3,99 @@ package com.cloudyte.app.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.cloudyte.app.api.ApiClient
+import com.cloudyte.app.CloudyteApplication
+import com.cloudyte.app.api.CloudFile
 import com.cloudyte.app.api.FileRepository
 import com.cloudyte.app.api.OfflineFileManager
-import com.cloudyte.app.ui.theme.*
+import com.cloudyte.app.core.cache.PreviewFetcher
+import com.cloudyte.app.data.FileCryptoActions
+import com.cloudyte.app.features.player.GDriveActionsBottomSheet
+import com.cloudyte.app.features.player.GDriveDeleteConfirmDialog
+import com.cloudyte.app.features.player.GDriveInfoBottomSheet
+import com.cloudyte.app.features.player.GDriveRenameDialog
+import com.cloudyte.app.features.player.performInAppDownload
+import com.cloudyte.app.features.player.performShareFileLink
+import com.cloudyte.app.ui.theme.JetBrainsMonoFontFamily
+import com.cloudyte.app.ui.theme.MetricLabelTextStyle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.Request
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,7 +106,23 @@ fun TextEditorScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    val file = remember(fileId) { FileRepository.getFile(fileId) }
+    val app = context.applicationContext as? CloudyteApplication
+
+    var dbFile by remember(fileId) { mutableStateOf<CloudFile?>(null) }
+    var dbLookupDone by remember(fileId) { mutableStateOf(FileRepository.getFile(fileId) != null || app == null) }
+    LaunchedEffect(fileId) {
+        if (app != null && FileRepository.getFile(fileId) == null) {
+            val local = withContext(Dispatchers.IO) {
+                app.container.database.cloudFileDao().getFileById(fileId)?.toCloudFile()
+            }
+            if (local != null) {
+                FileRepository.cacheFiles(listOf(local))
+                dbFile = local
+            }
+        }
+        dbLookupDone = true
+    }
+    val file = remember(fileId, dbFile) { FileRepository.getFile(fileId) ?: dbFile }
     val fileName = file?.effectiveName ?: "Document"
 
     var textContent by remember { mutableStateOf("") }
@@ -57,65 +130,50 @@ fun TextEditorScreen(
     var isLoading by remember { mutableStateOf(true) }
     var isSaving by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var retryTrigger by remember { mutableIntStateOf(0) }
     var isEditMode by remember { mutableStateOf(false) }
     var fontSize by remember { mutableFloatStateOf(13f) }
     var showSearchBar by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
 
-    val effectiveAccId = remember(accountId, file?.effectiveAccountId) {
-        when {
-            file?.effectiveAccountId?.isNotBlank() == true -> file.effectiveAccountId
-            accountId.isNotBlank() && accountId != "all" && accountId != "root" -> accountId
-            else -> ""
+    var showOverflowMenu by remember { mutableStateOf(false) }
+    var showActionsSheet by remember { mutableStateOf(false) }
+    var showInfoSheet by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var showMoveCopyDialog by remember { mutableStateOf(false) }
+    var isMoveAction by remember { mutableStateOf(true) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+    var snackbarMsg by remember { mutableStateOf<String?>(null) }
+    val downloadedIds by OfflineFileManager.downloadedFiles.collectAsState()
+
+    val effectiveAccId = file?.effectiveAccountId?.takeIf { it.isNotBlank() }
+        ?: accountId.takeIf { it.isNotBlank() && it != "all" && it != "root" }.orEmpty()
+
+    LaunchedEffect(snackbarMsg) {
+        snackbarMsg?.let {
+            snackbarHostState.showSnackbar(it)
+            snackbarMsg = null
         }
     }
 
-    val fileUrl = remember(effectiveAccId, fileId) {
-        val acc = effectiveAccId.ifBlank { accountId }
-        ApiClient.getFileUrl(acc, fileId, preview = false)
-    }
-
-    // Load file content
-    LaunchedEffect(fileId, effectiveAccId, file?.isEncrypted) {
+    LaunchedEffect(fileId, dbLookupDone, effectiveAccId, file?.isEncrypted, retryTrigger) {
+        if (!dbLookupDone) return@LaunchedEffect
         isLoading = true
         errorMessage = null
         try {
-            val content = withContext(Dispatchers.IO) {
-                val acc = effectiveAccId.ifBlank { accountId }
-                if (file?.isEncrypted == true) {
-                    val decryptedFile = OfflineFileManager.prepareDecryptedFileForViewer(context, acc, file).getOrThrow()
-                    decryptedFile.readText()
-                } else {
-                    val offlineFile = if (acc.isNotBlank() && acc != "all" && acc != "root") {
-                        if (file != null) {
-                            OfflineFileManager.prepareDecryptedFileForViewer(context, acc, file).getOrNull()
-                        } else {
-                            OfflineFileManager.findOfflineFile(context, acc, fileId)
-                        }
-                    } else null
-                    if (offlineFile != null && offlineFile.exists() && offlineFile.length() > 0) {
-                        offlineFile.readText()
-                    } else {
-                        val token = ApiClient.getToken()
-                        val requestBuilder = Request.Builder().url(fileUrl)
-                        if (!token.isNullOrEmpty()) {
-                            requestBuilder.header("Authorization", "Bearer $token")
-                        }
-                        val response = ApiClient.okHttpClient.newCall(requestBuilder.build()).execute()
-                        if (response.isSuccessful) {
-                            val text = response.body?.string() ?: ""
-                            file?.let {
-                                OfflineFileManager.autoCacheOnView(context, accountId, it)
-                            }
-                            text
-                        } else {
-                            throw Exception("Server returned HTTP ${response.code}")
-                        }
-                    }
-                }
-            }
+            val resolvedFile = file ?: CloudFile(id = fileId, name = fileName, accountId = effectiveAccId)
+            val readyFile = PreviewFetcher.resolvePreviewFile(
+                context = context,
+                accountId = effectiveAccId.ifBlank { accountId },
+                file = resolvedFile
+            ).getOrThrow()
+            val content = withContext(Dispatchers.IO) { readyFile.readText() }
             textContent = content
             originalContent = content
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             errorMessage = e.localizedMessage ?: "Failed to read file"
         } finally {
@@ -124,19 +182,19 @@ fun TextEditorScreen(
     }
 
     fun saveContent() {
-        if (isSaving) return
+        if (isSaving || app == null) return
         isSaving = true
         coroutineScope.launch {
             try {
                 val queueDirectory = java.io.File(context.filesDir, "queued-text").apply { mkdirs() }
                 val stagedFile = java.io.File.createTempFile("cloudyte-queued-text-", ".txt", queueDirectory)
                 stagedFile.writeText(textContent)
-                val app = context.applicationContext as com.cloudyte.app.CloudyteApplication
                 val shouldEncrypt = file?.isEncrypted == true || runCatching {
                     com.cloudyte.app.data.UserPreferences.observe(context).first().isUploadEncryptionEnabled
                 }.getOrDefault(false)
+                val targetAccount = effectiveAccId.ifBlank { accountId }
                 val transferId = app.container.transferRepository.enqueueTransfer(
-                    accountId = accountId,
+                    accountId = targetAccount,
                     fileName = fileName,
                     localPath = Uri.fromFile(stagedFile).toString(),
                     direction = com.cloudyte.app.db.TransferDirection.UPLOAD,
@@ -149,13 +207,114 @@ fun TextEditorScreen(
                 app.container.transferCoordinator.dispatch(com.cloudyte.app.core.transfer.TransferCommand.Start(transferId))
                 originalContent = textContent
                 isEditMode = false
-                Toast.makeText(context, "Save queued for upload", Toast.LENGTH_SHORT).show()
+                snackbarMsg = "Save queued for upload"
             } catch (error: Exception) {
                 Toast.makeText(context, error.message ?: "Failed to queue save", Toast.LENGTH_LONG).show()
             } finally {
                 isSaving = false
             }
         }
+    }
+
+    if (showMoveCopyDialog && file != null) {
+        MoveCopyDialog(
+            file = file,
+            sourceAccountId = effectiveAccId.ifBlank { accountId },
+            isMove = isMoveAction,
+            onDismiss = { showMoveCopyDialog = false },
+            onSuccess = { msg ->
+                showMoveCopyDialog = false
+                snackbarMsg = msg
+            }
+        )
+    }
+
+    if (showInfoSheet && file != null) {
+        GDriveInfoBottomSheet(
+            file = file,
+            accountId = effectiveAccId,
+            isDownloadedOffline = fileId in downloadedIds,
+            context = context,
+            onDismiss = { showInfoSheet = false }
+        )
+    }
+
+    if (showActionsSheet && file != null) {
+        GDriveActionsBottomSheet(
+            file = file,
+            accountId = effectiveAccId,
+            isDownloadedOffline = fileId in downloadedIds,
+            onDismiss = { showActionsSheet = false },
+            onShare = {
+                coroutineScope.launch {
+                    val err = performShareFileLink(context, effectiveAccId, file)
+                    if (!err.isNullOrBlank()) snackbarMsg = err
+                }
+            },
+            onDownload = {
+                coroutineScope.launch {
+                    snackbarMsg = performInAppDownload(context, effectiveAccId, file)
+                }
+            },
+            onOpenDetails = {
+                val navAcc = effectiveAccId.ifBlank { accountId }
+                navController.navigate("file_detail/$navAcc/$fileId")
+            },
+            onRename = { showRenameDialog = true },
+            onMove = {
+                isMoveAction = true
+                showMoveCopyDialog = true
+            },
+            onCopy = {
+                isMoveAction = false
+                showMoveCopyDialog = true
+            },
+            onEncryptCopy = if (!file.isEncrypted && app != null) {
+                {
+                    coroutineScope.launch {
+                        snackbarMsg = FileCryptoActions.createEncryptedCopy(
+                            context = context,
+                            accountId = effectiveAccId,
+                            targetFile = file,
+                            fallbackParentFolderId = null,
+                            cloudFileRepository = app.container.cloudFileRepository,
+                            transferRepository = app.container.transferRepository,
+                            transferCoordinator = app.container.transferCoordinator
+                        )
+                    }
+                }
+            } else null,
+            onDelete = { showDeleteDialog = true }
+        )
+    }
+
+    if (showRenameDialog && file != null && app != null) {
+        GDriveRenameDialog(
+            initialName = file.effectiveName,
+            onDismiss = { showRenameDialog = false },
+            onConfirm = { newName ->
+                showRenameDialog = false
+                coroutineScope.launch {
+                    val res = app.container.cloudFileRepository.rename(fileId, effectiveAccId.ifBlank { null }, newName)
+                    snackbarMsg = if (res.isSuccess) "Renamed to $newName" else (res.exceptionOrNull()?.message ?: "Rename failed")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDialog && file != null && app != null) {
+        GDriveDeleteConfirmDialog(
+            fileName = file.effectiveName,
+            onDismiss = { showDeleteDialog = false },
+            onConfirm = {
+                showDeleteDialog = false
+                coroutineScope.launch {
+                    val res = app.container.cloudFileRepository.delete(fileId, effectiveAccId.ifBlank { null })
+                    if (res.isSuccess) navController.popBackStack()
+                    else snackbarMsg = res.exceptionOrNull()?.message ?: "Delete failed"
+                }
+            }
+        )
     }
 
     val lines = remember(textContent) { textContent.lines() }
@@ -167,6 +326,12 @@ fun TextEditorScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.navigationBarsPadding()
+            )
+        },
         topBar = {
             TopAppBar(
                 title = {
@@ -176,50 +341,41 @@ fun TextEditorScreen(
                             color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
-                            maxLines = 1
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = if (isEditMode) "Editing mode" else "View mode",
+                            text = if (isEditMode) "Editing mode" else "Read only",
                             color = if (isEditMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.labelSmall
                         )
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
+                    IconButton(
+                        onClick = { navController.popBackStack() },
+                        modifier = Modifier.testTag("viewer_back_button")
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
                 actions = {
-                    // Search toggle
                     IconButton(onClick = { showSearchBar = !showSearchBar }) {
                         Icon(
                             Icons.Default.Search,
-                            contentDescription = "Search",
+                            contentDescription = "Find in document",
                             tint = if (showSearchBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                     }
 
-                    // Font size down
-                    IconButton(onClick = { if (fontSize > 9f) fontSize -= 2f }) {
-                        Text("A-", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    }
-
-                    // Font size up
-                    IconButton(onClick = { if (fontSize < 24f) fontSize += 2f }) {
-                        Text("A+", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                    }
-
-                    // Mode Toggle (View / Edit)
                     IconButton(onClick = { isEditMode = !isEditMode }) {
                         Icon(
                             imageVector = if (isEditMode) Icons.Default.Visibility else Icons.Default.Edit,
-                            contentDescription = "Toggle Edit",
+                            contentDescription = if (isEditMode) "View mode" else "Edit mode",
                             tint = if (isEditMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                     }
 
-                    // Save button if changed or in edit mode
                     if (isEditMode || textContent != originalContent) {
                         IconButton(onClick = { saveContent() }) {
                             if (isSaving) {
@@ -228,15 +384,75 @@ fun TextEditorScreen(
                                 Icon(Icons.Default.Save, contentDescription = "Save", tint = MaterialTheme.colorScheme.primary)
                             }
                         }
-                    } else {
-                        // Copy all button
-                        IconButton(onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = ClipData.newPlainText(fileName, textContent)
-                            clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                        }) {
-                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onSurface)
+                    }
+
+                    Box {
+                        IconButton(
+                            onClick = { showOverflowMenu = true },
+                            modifier = Modifier.testTag("viewer_more_button")
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = MaterialTheme.colorScheme.onSurface)
+                        }
+                        DropdownMenu(
+                            expanded = showOverflowMenu,
+                            onDismissRequest = { showOverflowMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Increase font size (A+)") },
+                                onClick = {
+                                    if (fontSize < 24f) fontSize += 2f
+                                    showOverflowMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Decrease font size (A-)") },
+                                onClick = {
+                                    if (fontSize > 9f) fontSize -= 2f
+                                    showOverflowMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Copy all text") },
+                                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText(fileName, textContent))
+                                    snackbarMsg = "Copied to clipboard"
+                                }
+                            )
+                            if (file != null) {
+                                DropdownMenuItem(
+                                    text = { Text(if (fileId in downloadedIds) "Saved offline • Export copy" else "Download") },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (fileId in downloadedIds) Icons.Default.DownloadDone else Icons.Default.Download,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        coroutineScope.launch {
+                                            snackbarMsg = performInAppDownload(context, effectiveAccId, file)
+                                        }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Details & Info") },
+                                    leadingIcon = { Icon(Icons.Outlined.Info, contentDescription = null) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showInfoSheet = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("All file actions…") },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showActionsSheet = true
+                                    }
+                                )
+                            }
                         }
                     }
                 },
@@ -248,8 +464,8 @@ fun TextEditorScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .testTag("text_editor_root")
         ) {
-            // Search Bar
             AnimatedVisibility(visible = showSearchBar) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainer,
@@ -264,7 +480,7 @@ fun TextEditorScreen(
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { searchQuery = it },
-                            placeholder = { Text("Find in document...", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) },
+                            placeholder = { Text("Find in document…", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -281,7 +497,7 @@ fun TextEditorScreen(
                             val matches = lines.count { it.contains(searchQuery, ignoreCase = true) }
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                "$matches lines",
+                                text = "$matches lines",
                                 color = MaterialTheme.colorScheme.primary,
                                 style = MetricLabelTextStyle,
                                 fontWeight = FontWeight.SemiBold
@@ -292,7 +508,7 @@ fun TextEditorScreen(
             }
 
             if (isLoading) {
-                com.cloudyte.app.ui.components.LoadingState(message = "Reading document...")
+                com.cloudyte.app.ui.components.LoadingState(message = "Opening document…")
             } else if (errorMessage != null) {
                 Box(
                     modifier = Modifier
@@ -305,22 +521,20 @@ fun TextEditorScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Unable to display document", color = MaterialTheme.colorScheme.onBackground, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(errorMessage ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(errorMessage.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(18.dp))
                         Button(
-                            onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fileUrl))
-                                context.startActivity(intent)
-                            },
+                            onClick = { retryTrigger++ },
                             modifier = Modifier.heightIn(min = 48.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Text("Download File", color = MaterialTheme.colorScheme.onPrimary)
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Retry", color = MaterialTheme.colorScheme.onPrimary)
                         }
                     }
                 }
             } else {
-                // Text / Code Container
                 val verticalScroll = rememberScrollState()
                 val horizontalScroll = rememberScrollState()
 
@@ -334,7 +548,6 @@ fun TextEditorScreen(
                             .fillMaxSize()
                             .verticalScroll(verticalScroll)
                     ) {
-                        // Line numbers gutter
                         Column(
                             modifier = Modifier
                                 .background(MaterialTheme.colorScheme.surfaceContainerLow)
@@ -352,7 +565,6 @@ fun TextEditorScreen(
                             }
                         }
 
-                        // Content editor / viewer
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -385,7 +597,6 @@ fun TextEditorScreen(
                     }
                 }
 
-                // Bottom Status Bar
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceContainer,
                     modifier = Modifier.fillMaxWidth()

@@ -151,6 +151,34 @@ class ThumbnailStore @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Zero-network lookup for any cached thumbnail already stored for this file (regardless of
+     * list/grid target pixel size) whose revision matches the current file revision.
+     */
+    suspend fun findAnyCached(
+        accountId: String,
+        file: CloudFile
+    ): File? = withContext(Dispatchers.IO) {
+        val resolvedAccId = when {
+            file.effectiveAccountId.isNotBlank() -> file.effectiveAccountId
+            accountId.isNotBlank() && accountId != "all" && accountId != "root" -> accountId
+            else -> ""
+        }
+        if (resolvedAccId.isBlank() || file.effectiveId.isBlank() || file.isFolderItem) return@withContext null
+        val expectedRevision = file.updatedAt?.toString() ?: file.time?.toString()
+        val entries = dao.findAnyForFile(resolvedAccId, file.effectiveId)
+        for (entry in entries) {
+            if (expectedRevision != null && entry.sourceRevision != null && entry.sourceRevision != expectedRevision) {
+                continue
+            }
+            val cached = File(entry.path)
+            if (cached.isFile && cached.length() > 0L) {
+                return@withContext cached
+            }
+        }
+        null
+    }
+
     suspend fun clearAccount(accountId: String) = withContext(Dispatchers.IO) {
         quotaManager.clearAccount(accountId)
     }
@@ -370,17 +398,23 @@ class ThumbnailStore @JvmOverloads constructor(
     private fun providerThumbUrl(accountId: String, file: CloudFile, sizePx: Int): String {
         val remote = file.thumbUrl
         if (!remote.isNullOrBlank()) {
-            val full = if (remote.startsWith("http://") || remote.startsWith("https://")) {
+            val baseFull = if (remote.startsWith("http://") || remote.startsWith("https://")) {
                 remote
             } else {
                 "${ApiClient.API_BASE_URL}/${remote.trimStart('/')}"
             }
-            val token = ApiClient.getToken()
-            return if (!token.isNullOrBlank() && !full.contains("token=")) {
-                val sep = if (full.contains("?")) "&" else "?"
-                "$full${sep}token=${android.net.Uri.encode(token)}"
+            val sizedFull = if (Regex("""([?&])s=\d+""").containsMatchIn(baseFull)) {
+                baseFull.replace(Regex("""([?&])s=\d+"""), "$1s=$sizePx")
             } else {
-                full
+                val sep = if (baseFull.contains("?")) "&" else "?"
+                "$baseFull${sep}s=$sizePx"
+            }
+            val token = ApiClient.getToken()
+            return if (!token.isNullOrBlank() && !sizedFull.contains("token=")) {
+                val sep = if (sizedFull.contains("?")) "&" else "?"
+                "$sizedFull${sep}token=${android.net.Uri.encode(token)}"
+            } else {
+                sizedFull
             }
         }
         val acc = file.effectiveAccountId.ifBlank { accountId.takeIf { it != "all" && it != "root" }.orEmpty() }

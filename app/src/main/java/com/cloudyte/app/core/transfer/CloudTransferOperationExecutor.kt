@@ -641,8 +641,13 @@ class CloudTransferOperationExecutor @JvmOverloads constructor(
             ?: cachedCloudFile?.encryptedSizeBytes
             ?: transfer.totalBytes
 
-        if (response.code() == 416 && existingOffset > 0L) {
-            if (expectedEncryptedOrRawTotal > 0L && existingOffset == expectedEncryptedOrRawTotal) {
+        if (response.code() == 416) {
+            val contentRangeTotal = parseContentRangeTotal(response.headers()["Content-Range"])
+            runCatching { response.errorBody()?.close() }
+            runCatching { response.body()?.close() }
+            val knownTotal = contentRangeTotal?.takeIf { it > 0L }
+                ?: expectedEncryptedOrRawTotal.takeIf { it > 0L }
+            if (existingOffset > 0L && knownTotal != null && existingOffset == knownTotal) {
                 finalizeDownloadedPartFile(
                     transfer = transfer,
                     partFile = partFile,
@@ -654,7 +659,9 @@ class CloudTransferOperationExecutor @JvmOverloads constructor(
                 )
                 return TransferOutcome.Completed
             }
-            partFile.delete()
+            if (partFile.exists()) {
+                partFile.delete()
+            }
             existingOffset = 0L
             rangeHeader = null
             transfers.updateResumableProgressOwned(transfer.id, leaseOwner, 0L, 0)
@@ -667,8 +674,13 @@ class CloudTransferOperationExecutor @JvmOverloads constructor(
 
         if (!response.isSuccessful) {
             val rawError = response.errorBody()?.string()
-            val message = ApiClient.parseError(rawError, response.code())
-            return mapHttpOutcome(response.code(), message)
+            val code = response.code()
+            val message = ApiClient.parseError(rawError, code)
+            if (code == 416) {
+                if (partFile.exists()) partFile.delete()
+                return TransferOutcome.Retryable("HTTP_416", message, httpStatus = 416)
+            }
+            return mapHttpOutcome(code, message)
         }
 
         val body = response.body()

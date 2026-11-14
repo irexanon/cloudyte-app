@@ -79,11 +79,14 @@ object StorageManager {
 
     suspend fun measure(context: Context): StorageBreakdown = withContext(Dispatchers.IO) {
         val appContext = context.applicationContext
-        val previewBytes = dirStats(File(appContext.cacheDir, "cloudyte_previews")).first
-        val coilDir = File(appContext.cacheDir, "image_cache")
+        val previewBytes = dirStats(File(appContext.cacheDir, "cloudyte_previews")).first +
+            dirStats(File(appContext.cacheDir, com.cloudyte.app.features.player.MediaStreamCache.CACHE_DIR_NAME)).first
+        val coilDir = File(appContext.cacheDir, "image_preview_cache")
+        val legacyCoilDir = File(appContext.cacheDir, "image_cache")
         val coilBytes = dirStats(coilDir).first +
+            dirStats(legacyCoilDir).first +
             (runCatching { appContext.imageLoader.diskCache?.size ?: 0L }.getOrDefault(0L)
-                .takeIf { !coilDir.exists() } ?: 0L)
+                .takeIf { !coilDir.exists() && !legacyCoilDir.exists() } ?: 0L)
         val httpBytes = dirStats(File(appContext.cacheDir, "http")).first
         val viewCacheBytes = dirStats(File(appContext.cacheDir, CryptoConstants.DECRYPTED_VIEW_CACHE_DIR)).first
         val stagingBytes = dirStats(File(appContext.cacheDir, CryptoConstants.ENCRYPTED_STAGING_DIR)).first +
@@ -126,11 +129,13 @@ object StorageManager {
 
         PreviewStore(appContext).clear()
         deletedCount += deleteDirContents(File(appContext.cacheDir, "cloudyte_previews"))
+        com.cloudyte.app.features.player.MediaStreamCache.clear(appContext)
 
         runCatching {
             appContext.imageLoader.memoryCache?.clear()
             appContext.imageLoader.diskCache?.clear()
         }
+        deletedCount += deleteDirContents(File(appContext.cacheDir, "image_preview_cache"))
         deletedCount += deleteDirContents(File(appContext.cacheDir, "image_cache"))
 
         runCatching { ApiClient.okHttpClient.cache?.evictAll() }

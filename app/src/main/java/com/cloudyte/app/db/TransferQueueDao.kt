@@ -10,7 +10,7 @@ abstract class TransferQueueDao {
     @Query("SELECT * FROM transfers WHERE state IN ('QUEUED','FAILED_RETRYABLE') AND (nextAttemptAt IS NULL OR nextAttemptAt <= :now) AND (leaseOwner IS NULL OR leaseExpiresAt IS NULL OR leaseExpiresAt <= :now) ORDER BY priority DESC, createdAt ASC LIMIT 1")
     protected abstract suspend fun nextCandidate(now: Long): LocalTransfer?
 
-    @Query("UPDATE transfers SET state='RUNNING', status='RUNNING', leaseOwner=:ownerId, leaseExpiresAt=:leaseUntil, lastAttemptAt=:now, attemptCount=attemptCount+1, updatedAt=:now WHERE id=:id AND state IN ('QUEUED','FAILED_RETRYABLE') AND (nextAttemptAt IS NULL OR nextAttemptAt <= :now) AND (leaseOwner IS NULL OR leaseExpiresAt IS NULL OR leaseExpiresAt <= :now)")
+    @Query("UPDATE transfers SET state='RUNNING', status='RUNNING', leaseOwner=:ownerId, leaseExpiresAt=:leaseUntil, lastAttemptAt=:now, attemptCount=attemptCount+1, errorMessage=NULL, lastErrorCode=NULL, lastErrorMessage=NULL, lastHttpStatus=NULL, updatedAt=:now WHERE id=:id AND state IN ('QUEUED','FAILED_RETRYABLE') AND (nextAttemptAt IS NULL OR nextAttemptAt <= :now) AND (leaseOwner IS NULL OR leaseExpiresAt IS NULL OR leaseExpiresAt <= :now)")
     protected abstract suspend fun claim(id: String, ownerId: String, now: Long, leaseUntil: Long): Int
 
     @Query("SELECT * FROM transfers WHERE id=:id")

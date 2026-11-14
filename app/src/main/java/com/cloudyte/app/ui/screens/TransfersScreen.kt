@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -249,18 +250,30 @@ fun TransfersScreen(
                 )
                 PrimaryTabRow(selectedTabIndex = selectedTab) {
                     tabs.forEachIndexed { index, title ->
+                        val isSelected = selectedTab == index
                         Tab(
-                            selected = selectedTab == index,
-                            onClick = { selectedTab = index },
-                            text = {
+                            selected = isSelected,
+                            onClick = { selectedTab = index }
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp)
+                                    .padding(horizontal = 4.dp, vertical = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
                                 Text(
                                     text = title,
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium
+                                    ),
                                     maxLines = 1,
                                     softWrap = false,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
-                        )
+                        }
                     }
                 }
             }
@@ -536,13 +549,23 @@ fun TransferItemCard(
                 )
             }
 
-            if (!transfer.errorMessage.isNullOrBlank()) {
+            val displayError = transfer.errorMessage?.takeIf { it.isNotBlank() }
+            if (displayError != null && transfer.status == TransferStatus.FAILED.name) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = transfer.errorMessage,
+                    text = displayError,
                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
                     color = MaterialTheme.colorScheme.error,
                     maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            } else if (displayError != null && transfer.status == TransferStatus.PENDING.name) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Retrying: $displayError",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.5.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }

@@ -10,6 +10,9 @@ interface ThumbnailDao {
     @Query("SELECT * FROM thumbnail_cache WHERE cacheKey = :cacheKey LIMIT 1")
     suspend fun get(cacheKey: String): ThumbnailEntity?
 
+    @Query("SELECT * FROM thumbnail_cache WHERE accountId = :accountId AND remoteId = :remoteId ORDER BY COALESCE(width, 0) DESC, lastAccessAt DESC LIMIT 10")
+    suspend fun findAnyForFile(accountId: String, remoteId: String): List<ThumbnailEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entry: ThumbnailEntity)
 

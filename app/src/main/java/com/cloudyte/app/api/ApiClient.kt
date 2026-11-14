@@ -11,6 +11,8 @@ import com.cloudyte.app.core.network.RequestCorrelationInterceptor
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.Cache
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -56,25 +58,39 @@ object ApiClient {
         if (!errorBody.isNullOrBlank()) {
             try {
                 val json = org.json.JSONObject(errorBody)
-                val err = json.optString("error").takeIf { it.isNotBlank() }
+                val nestedErrObj = json.optJSONObject("error")
+                val nestedErrMsg = nestedErrObj?.let { obj ->
+                    obj.optString("message").takeIf { it.isNotBlank() }
+                        ?: obj.optJSONArray("errors")?.optJSONObject(0)?.optString("message")?.takeIf { it.isNotBlank() }
+                        ?: obj.optString("error_description").takeIf { it.isNotBlank() }
+                }
+                val topLevelErr = if (nestedErrObj == null) {
+                    json.optString("error").takeIf { it.isNotBlank() && !it.trimStart().startsWith("{") }
+                } else null
+                val err = nestedErrMsg
+                    ?: topLevelErr
                     ?: json.optString("message").takeIf { it.isNotBlank() }
                     ?: json.optString("msg").takeIf { it.isNotBlank() }
+                    ?: json.optJSONArray("errors")?.optJSONObject(0)?.optString("message")?.takeIf { it.isNotBlank() }
                 if (!err.isNullOrBlank()) {
                     return err
                 }
             } catch (_: Exception) {
-                if (errorBody.length < 150 && !errorBody.contains("<html", ignoreCase = true)) {
+                if (errorBody.length < 150 && !errorBody.contains("<html", ignoreCase = true) && !errorBody.trimStart().startsWith("{")) {
                     return errorBody.trim()
                 }
             }
         }
         return when (statusCode) {
-            401 -> if (isRegister) "Registration unauthorized. Please try a different username." else "Invalid username or password. If you don't have an account, please Register."
-            400 -> "Invalid username or password format. Please check and try again."
-            404 -> "Account not found. Please click 'Register' below to create an account."
-            409 -> "Username is already taken. Please choose another username or log in."
+            401 -> if (isRegister) "Registration unauthorized. Please try a different username." else "Session expired or unauthorized. Please sign in again."
+            400 -> "Invalid request (HTTP 400). Please check and try again."
+            403 -> "Access denied by cloud provider (HTTP 403)."
+            404 -> "File or resource not found (HTTP 404)."
+            409 -> "Conflict occurred (HTTP 409). Please try again."
+            416 -> "Download range mismatch (HTTP 416). Restarting from beginning."
+            429 -> "Rate limited by provider (HTTP 429). Retrying shortly."
             500, 502, 503 -> "Server is temporarily unavailable. Please try again in a moment."
-            else -> "Authentication failed (Error $statusCode). Please try again."
+            else -> "Request failed (HTTP $statusCode). Please try again."
         }
     }
 
@@ -92,10 +108,16 @@ object ApiClient {
     }
 
     private fun createClient(cache: Cache? = null): OkHttpClient {
+        val dispatcher = Dispatcher().apply {
+            maxRequests = 64
+            maxRequestsPerHost = 16
+        }
         val builder = OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .dispatcher(dispatcher)
+            .connectionPool(ConnectionPool(12, 5, TimeUnit.MINUTES))
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .addInterceptor(RequestCorrelationInterceptor())
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)

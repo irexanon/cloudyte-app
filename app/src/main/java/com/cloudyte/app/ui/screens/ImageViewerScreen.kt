@@ -1,64 +1,97 @@
 package com.cloudyte.app.ui.screens
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.rememberTransformableState
-import androidx.compose.foundation.gestures.transformable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
-import androidx.compose.material.icons.automirrored.filled.NavigateBefore
-import androidx.compose.material.icons.automirrored.filled.NavigateNext
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.lerp
 import androidx.navigation.NavController
-import kotlin.math.absoluteValue
-import coil.compose.AsyncImagePainter
-import coil.compose.SubcomposeAsyncImage
-import coil.compose.SubcomposeAsyncImageContent
+import coil.imageLoader
+import coil.request.CachePolicy
+import coil.request.ImageRequest
+import com.cloudyte.app.CloudyteApplication
 import com.cloudyte.app.api.ApiClient
 import com.cloudyte.app.api.CloudFile
 import com.cloudyte.app.api.FileRepository
 import com.cloudyte.app.api.OfflineFileManager
-import com.cloudyte.app.ui.openFileInViewer
-import com.cloudyte.app.ui.theme.*
+import com.cloudyte.app.data.FileCryptoActions
+import com.cloudyte.app.features.player.GDriveActionsBottomSheet
+import com.cloudyte.app.features.player.GDriveDeleteConfirmDialog
+import com.cloudyte.app.features.player.GDriveImagePage
+import com.cloudyte.app.features.player.GDriveInfoBottomSheet
+import com.cloudyte.app.features.player.GDriveRenameDialog
+import com.cloudyte.app.features.player.GDriveTopBar
+import com.cloudyte.app.features.player.GDriveVideoContent
+import com.cloudyte.app.features.player.ViewerDarkBackdrop
+import com.cloudyte.app.features.player.ViewerSheetContainer
+import com.cloudyte.app.features.player.formatFileSubtitle
+import com.cloudyte.app.features.player.performInAppDownload
+import com.cloudyte.app.features.player.performShareFileLink
+import com.cloudyte.app.ui.theme.FileAudio
+import com.cloudyte.app.ui.theme.FileCode
+import com.cloudyte.app.ui.theme.FilePdf
+import com.cloudyte.app.ui.theme.MetricLabelTextStyle
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImageViewerScreen(
     navController: NavController,
@@ -67,9 +100,8 @@ fun ImageViewerScreen(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val app = context.applicationContext as? CloudyteApplication
 
-    // Retrieve active list from FileRepository or fallback to Room database
-    val app = context.applicationContext as? com.cloudyte.app.CloudyteApplication
     var dbFiles by remember(fileId) { mutableStateOf<List<CloudFile>>(emptyList()) }
     LaunchedEffect(fileId, accountId) {
         if (app != null) {
@@ -86,7 +118,9 @@ fun ImageViewerScreen(
         }
     }
 
-    val initialFile = remember(fileId, dbFiles) { FileRepository.getFile(fileId) ?: dbFiles.firstOrNull { it.effectiveId == fileId } }
+    val initialFile = remember(fileId, dbFiles) {
+        FileRepository.getFile(fileId) ?: dbFiles.firstOrNull { it.effectiveId == fileId }
+    }
     val allFilesInFolder = remember(fileId, dbFiles) {
         val list = FileRepository.getActiveList().filter { it.isFolder != true }
         when {
@@ -118,15 +152,20 @@ fun ImageViewerScreen(
         pageCount = { displayedFiles.size.coerceAtLeast(1) }
     )
 
-    val thumbnailListState = rememberLazyListState()
-
     var showControls by remember { mutableStateOf(true) }
     var currentScale by remember { mutableFloatStateOf(1f) }
-    var showMoreMenu by remember { mutableStateOf(false) }
+    var resetZoomSignal by remember { mutableIntStateOf(0) }
+    var showActionsSheet by remember { mutableStateOf(false) }
+    var showInfoSheet by remember { mutableStateOf(false) }
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
     var showMoveCopyDialog by remember { mutableStateOf(false) }
     var isMoveAction by remember { mutableStateOf(true) }
+
     val snackbarHostState = remember { SnackbarHostState() }
     var snackbarMsg by remember { mutableStateOf<String?>(null) }
+
+    val downloadedIds by OfflineFileManager.downloadedFiles.collectAsState()
 
     LaunchedEffect(snackbarMsg) {
         snackbarMsg?.let {
@@ -135,20 +174,48 @@ fun ImageViewerScreen(
         }
     }
 
-    // Scroll thumbnail list when pager changes
     LaunchedEffect(pagerState.currentPage) {
         currentScale = 1f
-        if (displayedFiles.isNotEmpty() && pagerState.currentPage in displayedFiles.indices) {
-            thumbnailListState.animateScrollToItem(pagerState.currentPage)
-        }
+        resetZoomSignal = 0
+    }
+
+    LaunchedEffect(pagerState.currentPage, displayedFiles) {
+        val loader = context.imageLoader
+        listOf(pagerState.currentPage - 1, pagerState.currentPage + 1)
+            .distinct()
+            .filter { it in displayedFiles.indices }
+            .forEach { idx ->
+                val adj = displayedFiles[idx]
+                if (!adj.isEncrypted && adj.isImage) {
+                    val adjAcc = adj.effectiveAccountId.ifBlank {
+                        accountId.takeIf { it.isNotBlank() && it != "all" && it != "root" }.orEmpty()
+                    }
+                    if (adjAcc.isNotBlank() && adj.effectiveId.isNotBlank()) {
+                        val rev = adj.updatedAt?.toString() ?: adj.time?.toString() ?: adj.sizeBytes.toString()
+                        val cacheKey = "img_preview_${adjAcc}_${adj.effectiveId}_$rev"
+                        val url = ApiClient.getCleanDownloadUrl(adjAcc, adj.effectiveId, preview = true)
+                        loader.enqueue(
+                            ImageRequest.Builder(context)
+                                .data(url)
+                                .diskCacheKey(cacheKey)
+                                .memoryCacheKey(cacheKey)
+                                .diskCachePolicy(CachePolicy.ENABLED)
+                                .memoryCachePolicy(CachePolicy.ENABLED)
+                                .build()
+                        )
+                    }
+                }
+            }
     }
 
     val currentFile = displayedFiles.getOrNull(pagerState.currentPage) ?: initialFile
+    val resolvedAccId = currentFile?.effectiveAccountId?.takeIf { it.isNotBlank() }
+        ?: accountId.takeIf { it.isNotBlank() && it != "all" && it != "root" }.orEmpty()
 
     if (showMoveCopyDialog && currentFile != null) {
         MoveCopyDialog(
             file = currentFile,
-            sourceAccountId = accountId,
+            sourceAccountId = resolvedAccId.ifBlank { accountId },
             isMove = isMoveAction,
             onDismiss = { showMoveCopyDialog = false },
             onSuccess = { msg ->
@@ -158,390 +225,284 @@ fun ImageViewerScreen(
         )
     }
 
+    if (showInfoSheet && currentFile != null) {
+        GDriveInfoBottomSheet(
+            file = currentFile,
+            accountId = resolvedAccId,
+            isDownloadedOffline = currentFile.effectiveId in downloadedIds,
+            context = context,
+            onDismiss = { showInfoSheet = false }
+        )
+    }
+
+    if (showActionsSheet && currentFile != null) {
+        GDriveActionsBottomSheet(
+            file = currentFile,
+            accountId = resolvedAccId,
+            isDownloadedOffline = currentFile.effectiveId in downloadedIds,
+            filterMediaOnly = filterMediaOnly,
+            totalFileCount = allFilesInFolder.size,
+            onDismiss = { showActionsSheet = false },
+            onShare = {
+                coroutineScope.launch {
+                    val err = performShareFileLink(context, resolvedAccId, currentFile)
+                    if (!err.isNullOrBlank()) snackbarMsg = err
+                }
+            },
+            onDownload = {
+                coroutineScope.launch {
+                    snackbarMsg = performInAppDownload(context, resolvedAccId, currentFile)
+                }
+            },
+            onOpenDetails = {
+                val navAcc = resolvedAccId.ifBlank { accountId }
+                navController.navigate("file_detail/$navAcc/${currentFile.effectiveId}")
+            },
+            onRename = { showRenameDialog = true },
+            onMove = {
+                isMoveAction = true
+                showMoveCopyDialog = true
+            },
+            onCopy = {
+                isMoveAction = false
+                showMoveCopyDialog = true
+            },
+            onEncryptCopy = if (!currentFile.isEncrypted && app != null) {
+                {
+                    coroutineScope.launch {
+                        snackbarMsg = FileCryptoActions.createEncryptedCopy(
+                            context = context,
+                            accountId = resolvedAccId,
+                            targetFile = currentFile,
+                            fallbackParentFolderId = null,
+                            cloudFileRepository = app.container.cloudFileRepository,
+                            transferRepository = app.container.transferRepository,
+                            transferCoordinator = app.container.transferCoordinator
+                        )
+                    }
+                }
+            } else null,
+            onToggleMediaFilter = { filterMediaOnly = !filterMediaOnly },
+            onDelete = { showDeleteDialog = true }
+        )
+    }
+
+    if (showRenameDialog && currentFile != null && app != null) {
+        GDriveRenameDialog(
+            initialName = currentFile.effectiveName,
+            onDismiss = { showRenameDialog = false },
+            onConfirm = { newName ->
+                showRenameDialog = false
+                coroutineScope.launch {
+                    val res = app.container.cloudFileRepository.rename(
+                        fileId = currentFile.effectiveId,
+                        accountId = resolvedAccId.ifBlank { null },
+                        newName = newName
+                    )
+                    snackbarMsg = if (res.isSuccess) "Renamed to $newName" else (res.exceptionOrNull()?.message ?: "Rename failed")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDialog && currentFile != null && app != null) {
+        GDriveDeleteConfirmDialog(
+            fileName = currentFile.effectiveName,
+            onDismiss = { showDeleteDialog = false },
+            onConfirm = {
+                showDeleteDialog = false
+                coroutineScope.launch {
+                    val res = app.container.cloudFileRepository.delete(
+                        fileId = currentFile.effectiveId,
+                        accountId = resolvedAccId.ifBlank { null }
+                    )
+                    if (res.isSuccess) {
+                        navController.popBackStack()
+                    } else {
+                        snackbarMsg = res.exceptionOrNull()?.message ?: "Delete failed"
+                    }
+                }
+            }
+        )
+    }
+
     Scaffold(
-        containerColor = Color.Black,
+        containerColor = ViewerDarkBackdrop,
         snackbarHost = {
             SnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier.navigationBarsPadding()
             )
         }
-    ) { paddingValues ->
+    ) { _ ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
-                .background(Color.Black)
+                .background(ViewerDarkBackdrop)
+                .testTag("image_viewer_root")
         ) {
             if (displayedFiles.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        text = "No media files available",
-                        color = Color.White.copy(alpha = 0.7f),
+                        text = "No files available",
+                        color = Color.White.copy(alpha = 0.72f),
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
             } else {
                 HorizontalPager(
                     state = pagerState,
+                    beyondViewportPageCount = 1,
                     modifier = Modifier.fillMaxSize(),
                     userScrollEnabled = currentScale <= 1.05f,
-                    pageSpacing = 16.dp
+                    pageSpacing = 12.dp
                 ) { page ->
-                    val file = displayedFiles.getOrNull(page)
-                    if (file != null) {
-                        val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).absoluteValue
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer {
-                                    // Smooth gallery slide transition with subtle depth & scale
-                                    val scale = lerp(0.92f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
-                                    scaleX = scale
-                                    scaleY = scale
-                                    alpha = lerp(0.55f, 1f, 1f - pageOffset.coerceIn(0f, 1f))
-                                }
-                        ) {
-                            MediaPageContent(
-                                file = file,
-                                accountId = accountId,
-                                isCurrentPage = pagerState.currentPage == page,
-                                onScaleChanged = { scale ->
-                                    if (pagerState.currentPage == page) {
-                                        currentScale = scale
+                    val pageFile = displayedFiles.getOrNull(page)
+                    if (pageFile != null) {
+                        val pageAcc = pageFile.effectiveAccountId.ifBlank { resolvedAccId }
+                        val isCurrent = pagerState.currentPage == page
+                        when {
+                            pageFile.isImage -> {
+                                GDriveImagePage(
+                                    file = pageFile,
+                                    accountId = pageAcc,
+                                    isCurrentPage = isCurrent,
+                                    resetZoomSignal = resetZoomSignal,
+                                    onScaleChanged = { scale ->
+                                        if (isCurrent) currentScale = scale
+                                    },
+                                    onTap = { showControls = !showControls }
+                                )
+                            }
+                            pageFile.isVideo -> {
+                                GDriveVideoContent(
+                                    file = pageFile,
+                                    accountId = pageAcc,
+                                    isActive = isCurrent,
+                                    showControls = showControls,
+                                    onToggleControls = { showControls = !showControls },
+                                    bottomPaddingExtra = displayedFiles.size > 1
+                                )
+                            }
+                            pageFile.isPdf -> {
+                                NonImagePreviewCard(
+                                    icon = Icons.Default.PictureAsPdf,
+                                    iconTint = FilePdf,
+                                    title = pageFile.effectiveName,
+                                    subtitle = "${pageFile.formattedSize} • PDF Document",
+                                    primaryLabel = "Open PDF",
+                                    primaryIcon = Icons.Default.MenuBook,
+                                    onTapBackdrop = { showControls = !showControls },
+                                    onPrimaryClick = {
+                                        navController.navigate("pdf_viewer/${pageAcc.ifBlank { accountId }}/${pageFile.effectiveId}")
                                     }
-                                },
-                                onTap = { showControls = !showControls },
-                                navController = navController
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Quick Next / Previous Side Chevron Navigation (Gallery slide buttons)
-            if (showControls && displayedFiles.size > 1) {
-                // Previous Button
-                if (pagerState.currentPage > 0) {
-                    IconButton(
-                        onClick = {
-                            coroutineScope.launch {
-                                pagerState.animateScrollToPage(
-                                    page = pagerState.currentPage - 1,
-                                    animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing)
                                 )
                             }
-                        },
-                        modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .padding(start = 12.dp)
-                            .size(48.dp)
-                            .background(Color.Black.copy(alpha = 0.65f), CircleShape)
-                            .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.NavigateBefore,
-                            contentDescription = "Previous",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-                }
-
-                // Next Button
-                if (pagerState.currentPage < displayedFiles.size - 1) {
-                    IconButton(
-                        onClick = {
-                            coroutineScope.launch {
-                                pagerState.animateScrollToPage(
-                                    page = pagerState.currentPage + 1,
-                                    animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing)
+                            pageFile.isAudio -> {
+                                NonImagePreviewCard(
+                                    icon = Icons.Default.Audiotrack,
+                                    iconTint = FileAudio,
+                                    title = pageFile.effectiveName,
+                                    subtitle = "${pageFile.formattedSize} • Audio",
+                                    primaryLabel = "Play Audio",
+                                    primaryIcon = Icons.Default.PlayArrow,
+                                    onTapBackdrop = { showControls = !showControls },
+                                    onPrimaryClick = {
+                                        navController.navigate("audio_player/${pageAcc.ifBlank { accountId }}/${pageFile.effectiveId}")
+                                    }
                                 )
                             }
-                        },
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .padding(end = 12.dp)
-                            .size(48.dp)
-                            .background(Color.Black.copy(alpha = 0.65f), CircleShape)
-                            .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.NavigateNext,
-                            contentDescription = "Next",
-                            tint = Color.White,
-                            modifier = Modifier.size(32.dp)
-                        )
-                    }
-                }
-            }
-
-            // Top Header Bar
-            AnimatedVisibility(
-                visible = showControls,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.TopCenter)
-            ) {
-                val currentAccId = currentFile?.effectiveAccountId?.takeIf { it.isNotBlank() }
-                    ?: accountId.takeIf { it.isNotBlank() && it != "all" && it != "root" }.orEmpty()
-                val currentFileUrl = if (currentFile != null && currentAccId.isNotBlank()) {
-                    ApiClient.getFileUrl(currentAccId, currentFile.effectiveId, preview = false)
-                } else ""
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Black.copy(alpha = 0.9f), Color.Black.copy(alpha = 0.4f), Color.Transparent)
-                            )
-                        )
-                        .statusBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            IconButton(
-                                onClick = { navController.popBackStack() },
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(
-                                    text = currentFile?.effectiveName ?: "Media Preview",
-                                    color = Color.White,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                            pageFile.isTextOrCode -> {
+                                NonImagePreviewCard(
+                                    icon = Icons.Default.Code,
+                                    iconTint = FileCode,
+                                    title = pageFile.effectiveName,
+                                    subtitle = "${pageFile.formattedSize} • Document / Code",
+                                    primaryLabel = "Open Document",
+                                    primaryIcon = Icons.Default.EditNote,
+                                    onTapBackdrop = { showControls = !showControls },
+                                    onPrimaryClick = {
+                                        navController.navigate("text_editor/${pageAcc.ifBlank { accountId }}/${pageFile.effectiveId}")
+                                    }
                                 )
-                                if (currentFile != null) {
-                                    Text(
-                                        text = "${currentFile.formattedSize} • ${currentFile.effectiveType.uppercase()} • ${pagerState.currentPage + 1} of ${displayedFiles.size}",
-                                        color = Color.White.copy(alpha = 0.72f),
-                                        style = MetricLabelTextStyle
-                                    )
-                                }
                             }
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            if (currentScale > 1.05f) {
-                                IconButton(
-                                    onClick = { currentScale = 1f },
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                                ) {
-                                    Icon(Icons.Default.ZoomOutMap, contentDescription = "Reset Zoom", tint = Color.White)
-                                }
-                            }
-
-                            // Share Action
-                            IconButton(
-                                onClick = {
-                                    if (currentFile?.isEncrypted == true) {
-                                        snackbarMsg = "Encrypted sharing is not supported"
-                                    } else if (currentFileUrl.isNotBlank()) {
-                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                            type = "text/plain"
-                                            putExtra(Intent.EXTRA_TEXT, currentFileUrl)
+                            else -> {
+                                NonImagePreviewCard(
+                                    icon = if (pageFile.isEncrypted) Icons.Default.Lock else Icons.AutoMirrored.Filled.InsertDriveFile,
+                                    iconTint = Color(0xFF8AB4F8),
+                                    title = pageFile.effectiveName,
+                                    subtitle = "${pageFile.formattedSize} • ${pageFile.effectiveType.uppercase()}",
+                                    primaryLabel = "Download",
+                                    primaryIcon = Icons.Default.Download,
+                                    secondaryLabel = "File Details",
+                                    secondaryIcon = Icons.Default.Info,
+                                    onTapBackdrop = { showControls = !showControls },
+                                    onPrimaryClick = {
+                                        coroutineScope.launch {
+                                            snackbarMsg = performInAppDownload(context, pageAcc, pageFile)
                                         }
-                                        context.startActivity(Intent.createChooser(shareIntent, "Share Media Link"))
+                                    },
+                                    onSecondaryClick = {
+                                        navController.navigate("file_detail/${pageAcc.ifBlank { accountId }}/${pageFile.effectiveId}")
                                     }
-                                },
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                            ) {
-                                Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
-                            }
-
-                            // Download Action
-                            IconButton(
-                                onClick = {
-                                    if (currentFile?.isEncrypted == true) {
-                                        navController.navigate("file_detail/$accountId/${currentFile.effectiveId}")
-                                    } else if (currentFileUrl.isNotBlank()) {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentFileUrl))
-                                        context.startActivity(intent)
-                                    }
-                                },
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                            ) {
-                                Icon(Icons.Default.Download, contentDescription = "Download", tint = Color.White)
-                            }
-
-                            // More Menu
-                            Box {
-                                IconButton(
-                                    onClick = { showMoreMenu = true },
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .background(Color.Black.copy(alpha = 0.45f), CircleShape)
-                                ) {
-                                    Icon(Icons.Default.MoreVert, contentDescription = "More Options", tint = Color.White)
-                                }
-
-                                DropdownMenu(
-                                    expanded = showMoreMenu,
-                                    onDismissRequest = { showMoreMenu = false },
-                                    modifier = Modifier.background(MaterialTheme.colorScheme.surfaceContainer)
-                                ) {
-                                    val cf = currentFile
-                                    if (cf != null) {
-                                        DropdownMenuItem(
-                                            text = { Text("Open in File Details", color = MaterialTheme.colorScheme.onSurface) },
-                                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) },
-                                            onClick = {
-                                                showMoreMenu = false
-                                                navController.navigate("file_detail/$accountId/${cf.effectiveId}")
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Move to...", color = MaterialTheme.colorScheme.onSurface) },
-                                            leadingIcon = { Icon(Icons.Default.DriveFileMove, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) },
-                                            onClick = {
-                                                showMoreMenu = false
-                                                isMoveAction = true
-                                                showMoveCopyDialog = true
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Copy to...", color = MaterialTheme.colorScheme.onSurface) },
-                                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp)) },
-                                            onClick = {
-                                                showMoreMenu = false
-                                                isMoveAction = false
-                                                showMoveCopyDialog = true
-                                            }
-                                        )
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                        DropdownMenuItem(
-                                            text = { Text(if (filterMediaOnly) "Show All Files (${allFilesInFolder.size})" else "Media Only Filter", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                            leadingIcon = { Icon(if (filterMediaOnly) Icons.Default.Folder else Icons.Default.Image, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp)) },
-                                            onClick = {
-                                                showMoreMenu = false
-                                                filterMediaOnly = !filterMediaOnly
-                                            }
-                                        )
-                                    }
-                                }
+                                )
                             }
                         }
                     }
                 }
             }
 
-            // Bottom Thumbnail Strip & Controls
+            // Google Drive Translucent Top Bar
+            val subtitleText = if (currentFile != null) {
+                val pageInfo = if (displayedFiles.size > 1) "${pagerState.currentPage + 1} of ${displayedFiles.size}" else null
+                formatFileSubtitle(currentFile, pageInfo)
+            } else null
+
+            GDriveTopBar(
+                visible = showControls,
+                title = currentFile?.effectiveName ?: "Preview",
+                subtitle = subtitleText,
+                file = currentFile,
+                isDownloadedOffline = currentFile?.effectiveId in downloadedIds,
+                onBack = { navController.popBackStack() },
+                onDownload = if (currentFile != null) {
+                    {
+                        coroutineScope.launch {
+                            snackbarMsg = performInAppDownload(context, resolvedAccId, currentFile)
+                        }
+                    }
+                } else null,
+                onInfo = if (currentFile != null) {
+                    { showInfoSheet = true }
+                } else null,
+                onMore = if (currentFile != null) {
+                    { showActionsSheet = true }
+                } else null,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
+
+            // Subtle Google Drive page position pill (only when multiple files and current page isn't a video scrubber)
             AnimatedVisibility(
-                visible = showControls && displayedFiles.size > 1,
+                visible = showControls && displayedFiles.size > 1 && currentFile?.isVideo != true,
                 enter = fadeIn(),
                 exit = fadeOut(),
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f), Color.Black.copy(alpha = 0.95f))
-                            )
-                        )
-                        .navigationBarsPadding()
-                        .padding(bottom = 12.dp, top = 20.dp)
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.Black.copy(alpha = 0.65f),
+                    modifier = Modifier.testTag("viewer_page_pill")
                 ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        // Filmstrip / Thumbnail Row
-                        LazyRow(
-                            state = thumbnailListState,
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            itemsIndexed(displayedFiles) { index, file ->
-                                val isSelected = index == pagerState.currentPage
-                                val itemAccId = file.effectiveAccountId.ifBlank {
-                                    accountId.takeIf { it.isNotBlank() && it != "all" && it != "root" }.orEmpty()
-                                }
-                                val thumbUrl = if (!file.isEncrypted && itemAccId.isNotBlank()) ApiClient.getFileUrl(itemAccId, file.effectiveId, preview = true) else ""
-
-                                Box(
-                                    modifier = Modifier
-                                        .size(width = 54.dp, height = 54.dp)
-                                        .clip(MaterialTheme.shapes.small)
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                        .border(
-                                            width = if (isSelected) 2.5.dp else 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.15f),
-                                            shape = MaterialTheme.shapes.small
-                                        )
-                                        .clickable {
-                                            coroutineScope.launch {
-                                                pagerState.animateScrollToPage(
-                                                    page = index,
-                                                    animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing)
-                                                )
-                                            }
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (file.isImage && !file.isEncrypted) {
-                                        SubcomposeAsyncImage(
-                                            model = thumbUrl,
-                                            contentDescription = file.effectiveName,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = when {
-                                                file.isVideo -> Icons.Default.Videocam
-                                                file.isAudio -> Icons.Default.Audiotrack
-                                                file.isPdf -> Icons.Default.PictureAsPdf
-                                                file.isTextOrCode -> Icons.Default.Code
-                                                file.isImage -> Icons.Default.Image
-                                                else -> Icons.AutoMirrored.Filled.InsertDriveFile
-                                            },
-                                            contentDescription = null,
-                                            tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Page Counter Indicator
-                        Text(
-                            text = "${pagerState.currentPage + 1} / ${displayedFiles.size}",
-                            color = Color.White.copy(alpha = 0.72f),
-                            style = MetricLabelTextStyle,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                    Text(
+                        text = "${pagerState.currentPage + 1} of ${displayedFiles.size}",
+                        color = Color.White.copy(alpha = 0.9f),
+                        style = MetricLabelTextStyle,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                    )
                 }
             }
         }
@@ -549,504 +510,101 @@ fun ImageViewerScreen(
 }
 
 @Composable
-private fun MediaPageContent(
-    file: CloudFile,
-    accountId: String,
-    isCurrentPage: Boolean,
-    onScaleChanged: (Float) -> Unit,
-    onTap: () -> Unit,
-    navController: NavController
+private fun NonImagePreviewCard(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    primaryLabel: String,
+    primaryIcon: ImageVector,
+    secondaryLabel: String? = null,
+    secondaryIcon: ImageVector? = null,
+    onTapBackdrop: () -> Unit,
+    onPrimaryClick: () -> Unit,
+    onSecondaryClick: (() -> Unit)? = null
 ) {
-    val context = LocalContext.current
-    val effectiveAccId = remember(accountId, file.effectiveAccountId) {
-        when {
-            file.effectiveAccountId.isNotBlank() -> file.effectiveAccountId
-            accountId.isNotBlank() && accountId != "all" && accountId != "root" -> accountId
-            else -> ""
-        }
-    }
-    val fileUrl = remember(file.isEncrypted, effectiveAccId, file.effectiveId) {
-        if (!file.isEncrypted && effectiveAccId.isNotBlank()) ApiClient.getFileUrl(effectiveAccId, file.effectiveId, preview = true) else ""
-    }
-
-    var decryptedViewerFile by remember(effectiveAccId, file.effectiveId) { mutableStateOf<java.io.File?>(null) }
-
-    // Auto-cache or prepare decrypted file in background when viewed
-    LaunchedEffect(file.effectiveId, effectiveAccId, file.isEncrypted) {
-        if (effectiveAccId.isNotBlank()) {
-            if (file.isEncrypted) {
-                val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    OfflineFileManager.prepareDecryptedFileForViewer(context, effectiveAccId, file)
-                }
-                decryptedViewerFile = res.getOrNull()
-            } else {
-                OfflineFileManager.autoCacheOnView(context, effectiveAccId, file)
-            }
-        }
-    }
-
-    val offlineFile = remember(effectiveAccId, file.effectiveId, file.isEncrypted) {
-        if (file.isEncrypted) null else OfflineFileManager.findOfflineFile(context, effectiveAccId, file.effectiveId)
-    }
-    val app = context.applicationContext as? com.cloudyte.app.CloudyteApplication
-    var cachedPreviewFile by remember(effectiveAccId, file.effectiveId) { mutableStateOf<java.io.File?>(null) }
-    LaunchedEffect(effectiveAccId, file.effectiveId, file.isEncrypted) {
-        if (!file.isEncrypted && app != null && effectiveAccId.isNotBlank()) {
-            val rev = file.updatedAt?.toString() ?: file.time?.toString()
-            val acc = app.container.database.accountDao().getAccountById(effectiveAccId)
-            val pType = acc?.accountType ?: "unknown"
-            cachedPreviewFile = app.container.previewStore.get(
-                com.cloudyte.app.core.cache.CacheKeyFactory.preview(effectiveAccId, pType, file.effectiveId, rev)
-            )
-        }
-    }
-    val imageModel: Any? = remember(file.isEncrypted, decryptedViewerFile, offlineFile, cachedPreviewFile, fileUrl) {
-        when {
-            decryptedViewerFile != null && decryptedViewerFile!!.exists() && decryptedViewerFile!!.length() > 0 -> decryptedViewerFile!!
-            !file.isEncrypted && offlineFile != null && offlineFile.exists() && offlineFile.length() > 0 -> offlineFile
-            !file.isEncrypted && cachedPreviewFile != null && cachedPreviewFile!!.exists() && cachedPreviewFile!!.length() > 0 -> cachedPreviewFile!!
-            !file.isEncrypted && fileUrl.isNotBlank() -> fileUrl
-            else -> null
-        }
-    }
-
-    when {
-        file.isImage -> {
-            var scale by remember { mutableFloatStateOf(1f) }
-            var offset by remember { mutableStateOf(Offset.Zero) }
-            var rotation by remember { mutableFloatStateOf(0f) }
-
-            // Reset zoom when not on this page
-            LaunchedEffect(isCurrentPage) {
-                if (!isCurrentPage) {
-                    scale = 1f
-                    offset = Offset.Zero
-                    rotation = 0f
-                    onScaleChanged(1f)
-                }
-            }
-
-            val transformState = rememberTransformableState { zoomChange, panChange, rotationChange ->
-                scale = (scale * zoomChange).coerceIn(0.5f, 6f)
-                offset += panChange
-                if (scale > 1.2f) {
-                    rotation += rotationChange
-                }
-                onScaleChanged(scale)
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = { onTap() },
-                            onDoubleTap = {
-                                if (scale > 1.1f) {
-                                    scale = 1f
-                                    offset = Offset.Zero
-                                    rotation = 0f
-                                    onScaleChanged(1f)
-                                } else {
-                                    scale = 2.5f
-                                    onScaleChanged(2.5f)
-                                }
-                            }
-                        )
-                    }
-                    .transformable(state = transformState),
-                contentAlignment = Alignment.Center
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ViewerDarkBackdrop)
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { onTapBackdrop() })
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = ViewerSheetContainer,
+            tonalElevation = 4.dp,
+            modifier = Modifier
+                .padding(horizontal = 28.dp)
+                .fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                val imageRequest = remember(imageModel, context) {
-                    coil.request.ImageRequest.Builder(context)
-                        .data(imageModel)
-                        .crossfade(true)
-                        .build()
-                }
-                SubcomposeAsyncImage(
-                    model = imageRequest,
-                    contentDescription = file.effectiveName,
+                Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer(
-                            scaleX = scale,
-                            scaleY = scale,
-                            rotationZ = rotation,
-                            translationX = offset.x,
-                            translationY = offset.y
-                        ),
-                    contentScale = ContentScale.Fit
+                        .size(76.dp)
+                        .background(iconTint.copy(alpha = 0.16f), CircleShape),
+                    contentAlignment = Alignment.Center
                 ) {
-                    val state = painter.state
-                    when (state) {
-                        is AsyncImagePainter.State.Loading -> {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    com.cloudyte.app.ui.components.AppLoadingIndicator(size = 32.dp, color = MaterialTheme.colorScheme.primary)
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Text("Loading image...", color = Color.White.copy(alpha = 0.72f), style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
-                        }
-                        is AsyncImagePainter.State.Error -> {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-                                    Icon(Icons.Default.BrokenImage, contentDescription = null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(56.dp))
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                    Text("Failed to load image preview", color = Color.White.copy(alpha = 0.75f), style = MaterialTheme.typography.bodyMedium)
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Button(
-                                        onClick = {
-                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fileUrl))
-                                            context.startActivity(intent)
-                                        },
-                                        modifier = Modifier.heightIn(min = 48.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                                    ) {
-                                        Text("Open in Browser", color = MaterialTheme.colorScheme.onPrimary)
-                                    }
-                                }
-                            }
-                        }
-                        else -> {
-                            SubcomposeAsyncImageContent()
-                        }
-                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(38.dp)
+                    )
                 }
-            }
-        }
 
-        file.isVideo -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { onTap() })
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Card(
-                    shape = MaterialTheme.shapes.extraLarge,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                Spacer(modifier = Modifier.height(18.dp))
+                Text(
+                    text = title,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = subtitle,
+                    color = Color.White.copy(alpha = 0.68f),
+                    style = MetricLabelTextStyle,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(22.dp))
+
+                Button(
+                    onClick = onPrimaryClick,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF8AB4F8),
+                        contentColor = Color(0xFF0B1C3A)
+                    ),
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier
-                        .padding(24.dp)
-                        .fillMaxWidth(0.9f)
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Icon(primaryIcon, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(primaryLabel, fontWeight = FontWeight.SemiBold)
+                }
+
+                if (secondaryLabel != null && secondaryIcon != null && onSecondaryClick != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = onSecondaryClick,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp)
-                                .clip(MaterialTheme.shapes.large)
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            val videoThumbUrl = ApiClient.getFileUrl(accountId, file.effectiveId, preview = true)
-                            SubcomposeAsyncImage(
-                                model = videoThumbUrl,
-                                contentDescription = file.effectiveName,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .size(68.dp)
-                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
-                                    .clickable {
-                                        navController.navigate("video_player/$accountId/${file.effectiveId}")
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = "Play Video", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(38.dp))
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = file.effectiveName,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "${file.formattedSize} • Video",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MetricLabelTextStyle
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Button(
-                            onClick = { navController.navigate("video_player/$accountId/${file.effectiveId}") },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                        ) {
-                            Icon(Icons.Default.PlayCircle, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Play in Full Video Player", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-        }
-
-        file.isAudio -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { onTap() })
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Card(
-                    shape = MaterialTheme.shapes.extraLarge,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                    modifier = Modifier
-                        .padding(24.dp)
-                        .fillMaxWidth(0.9f)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(110.dp)
-                                .background(MaterialTheme.colorScheme.primary, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Audiotrack, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(54.dp))
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = file.effectiveName,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "${file.formattedSize} • Audio Track",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MetricLabelTextStyle
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        Button(
-                            onClick = { navController.navigate("audio_player/$accountId/${file.effectiveId}") },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Open in Audio Player", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-        }
-
-        file.isPdf -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { onTap() })
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Card(
-                    shape = MaterialTheme.shapes.extraLarge,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                    modifier = Modifier
-                        .padding(24.dp)
-                        .fillMaxWidth(0.9f)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(90.dp)
-                                .background(FilePdf.copy(alpha = 0.15f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.PictureAsPdf, contentDescription = null, tint = FilePdf, modifier = Modifier.size(46.dp))
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = file.effectiveName,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "${file.formattedSize} • PDF Document",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MetricLabelTextStyle
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        Button(
-                            onClick = { navController.navigate("pdf_viewer/$accountId/${file.effectiveId}") },
-                            colors = ButtonDefaults.buttonColors(containerColor = FilePdf, contentColor = Color.White),
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                        ) {
-                            Icon(Icons.Default.MenuBook, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Open in PDF Viewer", fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-        }
-
-        file.isTextOrCode -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { onTap() })
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Card(
-                    shape = MaterialTheme.shapes.extraLarge,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                    modifier = Modifier
-                        .padding(24.dp)
-                        .fillMaxWidth(0.9f)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(90.dp)
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Code, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(46.dp))
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = file.effectiveName,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "${file.formattedSize} • Text / Code Document",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MetricLabelTextStyle
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        Button(
-                            onClick = { navController.navigate("text_editor/$accountId/${file.effectiveId}") },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                        ) {
-                            Icon(Icons.Default.EditNote, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Open in Text Editor", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-        }
-
-        else -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { onTap() })
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Card(
-                    shape = MaterialTheme.shapes.extraLarge,
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                    modifier = Modifier
-                        .padding(24.dp)
-                        .fillMaxWidth(0.9f)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(90.dp)
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(46.dp))
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = file.effectiveName,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            maxLines = 2
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "${file.formattedSize} • ${file.effectiveType.uppercase()}",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            style = MetricLabelTextStyle
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        Button(
-                            onClick = { navController.navigate("file_detail/$accountId/${file.effectiveId}") },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                        ) {
-                            Icon(Icons.Default.Info, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("View Full File Details", fontWeight = FontWeight.SemiBold)
-                        }
+                        Icon(secondaryIcon, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(secondaryLabel, color = Color.White, fontWeight = FontWeight.Medium)
                     }
                 }
             }
