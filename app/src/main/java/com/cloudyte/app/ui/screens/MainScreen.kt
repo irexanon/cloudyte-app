@@ -1,5 +1,7 @@
 package com.cloudyte.app.ui.screens
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -7,13 +9,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationRail
@@ -25,11 +33,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlin.math.roundToInt
 import androidx.navigation.NavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -39,6 +52,9 @@ import androidx.navigation.compose.rememberNavController
 import com.cloudyte.app.R
 import com.cloudyte.app.data.UserPreferences
 import com.cloudyte.app.data.UserPreferencesState
+import com.cloudyte.app.db.TransferStatus
+import com.cloudyte.app.domain.model.Transfer
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cloudyte.app.features.accounts.AccountsScreen as FeatureAccountsScreen
 import com.cloudyte.app.features.files.FilesScreen as FeatureFilesScreen
 import com.cloudyte.app.features.home.HomeScreen as FeatureHomeScreen
@@ -133,16 +149,24 @@ fun MainScreen(rootNavController: NavController) {
                         modifier = Modifier.fillMaxSize()
                     )
 
-                    FloatingNavigationBar(
-                        navController = bottomNavController,
-                        showNavText = prefsState.showNavText,
+                    androidx.compose.foundation.layout.Column(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .fillMaxWidth(),
-                        onNavigate = { route ->
-                            bottomNavController.navigateSingleTopRestore(route)
-                        }
-                    )
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        ActiveTransferPill(navController = bottomNavController)
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(4.dp))
+                        FloatingNavigationBar(
+                            navController = bottomNavController,
+                            showNavText = prefsState.showNavText,
+                            modifier = Modifier.fillMaxWidth(),
+                            onNavigate = { route ->
+                                bottomNavController.navigateSingleTopRestore(route)
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -202,3 +226,77 @@ private fun MainNavHost(
         composable("settings") { FeatureSettingsScreen(bottomNavController, rootNavController) }
     }
 }
+
+@Composable
+private fun ActiveTransferPill(navController: NavController) {
+    val context = LocalContext.current
+    val app = context.applicationContext as? com.cloudyte.app.CloudyteApplication ?: return
+    val coordinator = app.container.transferCoordinator
+    val activeTransfers by coordinator.observeActiveTransfers().collectAsStateWithLifecycle(initialValue = emptyList())
+    val currentEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = currentEntry?.destination?.route
+
+    val firstActive = activeTransfers.firstOrNull {
+        it.status == com.cloudyte.app.db.TransferStatus.RUNNING.name ||
+        it.status == com.cloudyte.app.db.TransferStatus.PENDING.name
+    }
+
+    androidx.compose.animation.AnimatedVisibility(
+        visible = firstActive != null && currentRoute != "transfers",
+        enter = androidx.compose.animation.slideInVertically { it } + androidx.compose.animation.fadeIn(),
+        exit = androidx.compose.animation.slideOutVertically { it } + androidx.compose.animation.fadeOut(),
+        modifier = Modifier.padding(horizontal = 24.dp)
+    ) {
+        if (firstActive != null) {
+            val progress = if (firstActive.totalBytes > 0) {
+                (firstActive.bytesTransferred.toFloat() / firstActive.totalBytes.toFloat()).coerceIn(0f, 1f)
+            } else 0f
+            val percent = (progress * 100f).roundToInt()
+            val typeLabel = if (firstActive.direction == "UPLOAD") "Uploading" else "Downloading"
+
+            androidx.compose.material3.Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable { navController.navigateSingleTopRestore("transfers") }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        imageVector = if (firstActive.direction == "UPLOAD") Icons.Default.Upload else Icons.Default.Download,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "$typeLabel ${firstActive.fileName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "$percent%",
+                        style = com.cloudyte.app.ui.theme.MetricTextStyle,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+}
+

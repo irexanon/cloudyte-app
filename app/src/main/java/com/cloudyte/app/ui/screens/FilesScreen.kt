@@ -2231,7 +2231,7 @@ fun FolderGridItem(
                     Text(
                         text = folder.effectiveName,
                         style = MaterialTheme.typography.bodySmall,
-                        fontSize = 12.5.sp,
+                        fontSize = 13.sp,
                         lineHeight = 16.sp,
                         fontWeight = FontWeight.Normal,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -2398,7 +2398,7 @@ fun FileGridItem(
                     Text(
                         text = file.effectiveName,
                         style = MaterialTheme.typography.bodySmall,
-                        fontSize = 12.5.sp,
+                        fontSize = 13.sp,
                         lineHeight = 16.sp,
                         fontWeight = FontWeight.Normal,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -2582,7 +2582,7 @@ fun FileRow(
                 Text(
                     text = file.effectiveName,
                     style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 13.5.sp,
+                    fontSize = 13.sp,
                     lineHeight = 17.sp,
                     fontWeight = FontWeight.Normal,
                     color = MaterialTheme.colorScheme.onSurface,

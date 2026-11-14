@@ -64,6 +64,7 @@ data class UserPreferencesState(
     val backupIntervalHours: Int = 6,
     val backupMaxFileSizeMb: Int = 50,
     val deleteAfterUpload: Boolean = false,
+    val backupFolders: Set<String> = setOf("Pictures", "Downloads", "Documents", "DCIM"),
     val maxCacheSizeMb: Int = 256,
     val downloadDirectory: String = "INTERNAL",
     val autoCleanCache: Boolean = false,
