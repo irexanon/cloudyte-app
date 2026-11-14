@@ -2,9 +2,9 @@ package com.cloudyte.app.data
 
 import android.content.Context
 import android.net.Uri
-import android.os.Environment
 import com.cloudyte.app.api.CloudFile
 import com.cloudyte.app.api.OfflineFileManager
+import com.cloudyte.app.core.cache.StorageManager
 import com.cloudyte.app.core.transfer.TransferCommand
 import com.cloudyte.app.core.transfer.TransferCoordinator
 import com.cloudyte.app.db.TransferDirection
@@ -48,8 +48,7 @@ object FileCryptoActions {
             }
             decryptedResult.fold(
                 onSuccess = { decryptedFile ->
-                    val exportDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                        ?: File(context.filesDir, "exports").apply { mkdirs() }
+                    val exportDir = StorageManager.getPreferredExportDir(context)
                     exportDir.mkdirs()
                     val safeName = targetFile.effectiveName
                         .replace(Regex("[^a-zA-Z0-9._-]"), "_")
@@ -62,15 +61,14 @@ object FileCryptoActions {
                             }
                         }
                     }
-                    "Decrypted and exported: ${destFile.name}"
+                    "Decrypted and exported to ${destFile.parentFile?.name ?: "downloads"}/${destFile.name}"
                 },
                 onFailure = { err ->
                     err.message ?: "Failed to decrypt file"
                 }
             )
         } else {
-            val exportDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
-                ?: File(context.filesDir, "downloads").apply { mkdirs() }
+            val exportDir = StorageManager.getPreferredExportDir(context)
             exportDir.mkdirs()
             val safeName = targetFile.effectiveName
                 .replace(Regex("[^a-zA-Z0-9._-]"), "_")

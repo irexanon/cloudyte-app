@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,11 +34,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
-import com.cloudyte.app.api.ApiClient
+import com.cloudyte.app.data.AccountSessionHelper
 import com.cloudyte.app.ui.components.GroupedList
 import com.cloudyte.app.ui.components.GroupedListItem
 import com.cloudyte.app.ui.components.LocalBottomBarInset
 import com.cloudyte.app.ui.components.SectionRow
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(
@@ -46,14 +48,21 @@ fun SettingsScreen(
     onNavigateSection: (SettingsSectionType) -> Unit = {},
     onNavigateExclusions: () -> Unit = {},
     onNavigateTransfers: () -> Unit = {},
-    onLogout: () -> Unit = {
-        ApiClient.saveToken(null)
-        rootNavController?.navigate("login") {
-            popUpTo("main") { inclusive = true }
-        }
-    }
+    onLogout: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val effectiveLogout: () -> Unit = onLogout ?: {
+        scope.launch {
+            val result = AccountSessionHelper.performLogout(context)
+            result.warningMessage?.let { msg ->
+                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+            }
+            rootNavController?.navigate("login") {
+                popUpTo("main") { inclusive = true }
+            }
+        }
+    }
 
     var selectedSection by remember { mutableStateOf<SettingsSectionType?>(null) }
     var currentSubScreen by remember { mutableStateOf<String?>(null) }
@@ -98,7 +107,8 @@ fun SettingsScreen(
                 // Accounts are managed from Settings, not the primary navigation bar.
                 currentSubScreen = "ACCOUNTS"
             },
-            onLogout = onLogout
+            onNavigateBackup = { selectedSection = SettingsSectionType.BACKUP },
+            onLogout = effectiveLogout
         )
         return
     }

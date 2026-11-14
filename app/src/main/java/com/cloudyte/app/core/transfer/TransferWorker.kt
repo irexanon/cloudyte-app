@@ -9,6 +9,7 @@ import androidx.work.WorkerParameters
 import com.cloudyte.app.CloudyteApplication
 import com.cloudyte.app.core.transfer.notification.TransferNotification
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 
 class TransferWorker(
     appContext: Context,
@@ -73,11 +74,14 @@ class TransferWorker(
             return Result.success()
         }
 
+        val prefs = com.cloudyte.app.data.UserPreferences.observe(applicationContext).first()
+        val showDetailedProgress = prefs.notificationsEnabled && prefs.progressAlerts
         trySetForeground(
             TransferNotification.foregroundInfo(
                 applicationContext,
                 queueDao.aggregateBytesTransferred(),
-                queueDao.aggregateTotalBytes()
+                queueDao.aggregateTotalBytes(),
+                showDetailedProgress = showDetailedProgress
             )
         )
         val trigger = runCatching { DrainTrigger.valueOf(inputData.getString(KEY_TRIGGER) ?: "APP_START") }
@@ -98,7 +102,8 @@ class TransferWorker(
                     applicationContext,
                     queueDao.aggregateBytesTransferred(),
                     queueDao.aggregateTotalBytes(),
-                    snapshot.transferId
+                    snapshot.transferId,
+                    showDetailedProgress = showDetailedProgress
                 )
             )
         }

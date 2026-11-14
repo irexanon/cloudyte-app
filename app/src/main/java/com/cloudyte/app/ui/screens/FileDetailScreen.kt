@@ -30,6 +30,7 @@ import com.cloudyte.app.ui.components.LocalBottomBarInset
 import com.cloudyte.app.ui.openFileInViewer
 import com.cloudyte.app.ui.theme.MetricLabelTextStyle
 import com.cloudyte.app.ui.theme.MetricTextStyle
+import kotlinx.coroutines.flow.first
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -42,6 +43,7 @@ fun FileDetailScreen(
     viewModel: FileDetailViewModel = viewModel()
 ) {
     val context = LocalContext.current
+    val prefsState by com.cloudyte.app.data.UserPreferences.observe(context).collectAsState(initial = com.cloudyte.app.data.UserPreferencesState())
     val file by viewModel.file.collectAsState()
     val shareUrl by viewModel.shareUrl.collectAsState()
     val shareError by viewModel.shareError.collectAsState()
@@ -520,7 +522,8 @@ fun FileDetailScreen(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = {
-                        if (nonNullFile.isEncrypted) {
+                        val useInternal = prefsState.downloadDirectory != "EXTERNAL"
+                        if (nonNullFile.isEncrypted || useInternal) {
                             viewModel.downloadOrDecryptExportFile(accountId, nonNullFile) { msg ->
                                 actionFeedbackMessage = msg
                             }
@@ -533,7 +536,7 @@ fun FileDetailScreen(
                                 request.setTitle(nonNullFile.effectiveName)
                                 request.setDescription(strDownloadingDesc)
                                 request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                                request.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, nonNullFile.effectiveName)
+                                request.setDestinationInExternalFilesDir(context, android.os.Environment.DIRECTORY_DOWNLOADS, nonNullFile.effectiveName)
 
                                 val downloadManager = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
                                 downloadManager.enqueue(request)

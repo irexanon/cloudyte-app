@@ -136,11 +136,65 @@ class AppContainer(context: Context) {
                 providers = providerRegistry,
                 contentKeyProvider = contentKeyManager,
                 streamFileCrypto = streamFileCrypto,
-                metadataCodec = metadataCodec
+                metadataCodec = metadataCodec,
+                onLocalDeletionFailed = { transfer, message ->
+                    com.cloudyte.app.core.transfer.notification.NotificationHelper.postEventIfEnabled(
+                        context = appContext,
+                        eventType = com.cloudyte.app.core.transfer.notification.NotificationEventType.BACKUP_FAILURE,
+                        title = "Local copy not deleted",
+                        message = message,
+                        notificationId = transfer.id.hashCode()
+                    )
+                }
             ),
             ownerId = "${Process.myPid()}-${UUID.randomUUID()}",
             networkGate = transferNetworkGate,
-            diagnostics = transferDiagnostics
+            diagnostics = transferDiagnostics,
+            maxRetryCount = {
+                com.cloudyte.app.data.UserPreferences.observe(appContext).first().transferRetryCount
+            },
+            onTerminalOutcome = { transfer, outcome ->
+                when (outcome) {
+                    com.cloudyte.app.core.transfer.TransferOutcome.Completed -> {
+                        val eventType = if (transfer.direction == com.cloudyte.app.db.TransferDirection.BACKUP.name) {
+                            com.cloudyte.app.core.transfer.notification.NotificationEventType.BACKUP_COMPLETED
+                        } else {
+                            com.cloudyte.app.core.transfer.notification.NotificationEventType.TRANSFER_COMPLETED
+                        }
+                        com.cloudyte.app.core.transfer.notification.NotificationHelper.postEventIfEnabled(
+                            context = appContext,
+                            eventType = eventType,
+                            title = if (transfer.direction == com.cloudyte.app.db.TransferDirection.DOWNLOAD.name) "Download complete" else "Upload complete",
+                            message = transfer.fileName,
+                            notificationId = transfer.id.hashCode()
+                        )
+                    }
+                    is com.cloudyte.app.core.transfer.TransferOutcome.Permanent -> {
+                        val eventType = if (transfer.direction == com.cloudyte.app.db.TransferDirection.BACKUP.name) {
+                            com.cloudyte.app.core.transfer.notification.NotificationEventType.BACKUP_FAILURE
+                        } else {
+                            com.cloudyte.app.core.transfer.notification.NotificationEventType.TRANSFER_FAILURE
+                        }
+                        com.cloudyte.app.core.transfer.notification.NotificationHelper.postEventIfEnabled(
+                            context = appContext,
+                            eventType = eventType,
+                            title = "Transfer failed: ${transfer.fileName}",
+                            message = outcome.message,
+                            notificationId = transfer.id.hashCode()
+                        )
+                    }
+                    is com.cloudyte.app.core.transfer.TransferOutcome.WaitingForAuth -> {
+                        com.cloudyte.app.core.transfer.notification.NotificationHelper.postEventIfEnabled(
+                            context = appContext,
+                            eventType = com.cloudyte.app.core.transfer.notification.NotificationEventType.TRANSFER_FAILURE,
+                            title = "Authentication required",
+                            message = "${transfer.fileName}: ${outcome.message}",
+                            notificationId = transfer.id.hashCode()
+                        )
+                    }
+                    else -> Unit
+                }
+            }
         )
     }
 

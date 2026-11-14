@@ -127,19 +127,19 @@
     <string name="settings_section_storage">Storage</string>
     <string name="settings_section_storage_sub">Cache, downloads, free space</string>
     <string name="settings_section_permissions">Permissions</string>
-    <string name="settings_section_permissions_sub">Media access, notifications</string>
+    <string name="settings_section_permissions_sub">Notifications, scoped folder access</string>
     <string name="settings_section_security">Security</string>
-    <string name="settings_section_security_sub">App lock, screenshots</string>
+    <string name="settings_section_security_sub">App lock, screenshots, E2EE</string>
     <string name="settings_section_appearance">Appearance</string>
     <string name="settings_section_appearance_sub">Theme, grid, layout</string>
     <string name="settings_section_playback">Playback</string>
     <string name="settings_section_playback_sub">Streaming, background audio</string>
     <string name="settings_section_notifications">Notifications</string>
-    <string name="settings_section_notifications_sub">Progress and failure alerts</string>
+    <string name="settings_section_notifications_sub">Progress, backup &amp; failure alerts</string>
     <string name="settings_section_advanced">Advanced</string>
-    <string name="settings_section_advanced_sub">Transfers, retries, logging</string>
+    <string name="settings_section_advanced_sub">Retries, metered/roaming, logging</string>
     <string name="settings_section_about">About</string>
-    <string name="settings_section_about_sub">Version, links, updates</string>
+    <string name="settings_section_about_sub">Version, terms, privacy &amp; licenses</string>
 
     <!-- Account Section -->
     <string name="settings_server_url">Server URL</string>
@@ -152,25 +152,43 @@
 
     <!-- Backup Section -->
     <string name="settings_auto_backup">Enable Auto Backup</string>
-    <string name="settings_auto_backup_sub">Syncs selected folder in the background periodically</string>
+    <string name="settings_auto_backup_sub">Automatically scans enabled folders on schedule and queues new or changed files</string>
     <string name="settings_backup_folders">Backup Folders</string>
-    <string name="settings_backup_schedule">Schedule</string>
+    <string name="settings_backup_target_drive">Backup Target Drive</string>
+    <string name="settings_backup_quick_media">Back up new media quickly</string>
+    <string name="settings_backup_quick_media_sub">Watches MediaStore changes with periodic scan as fallback. Android and OEM battery optimizations may delay background execution.</string>
+    <string name="settings_backup_schedule">Backup Interval</string>
+    <string name="settings_backup_wifi_only">Wi-Fi Only</string>
+    <string name="settings_backup_wifi_only_sub">Pause automatic backups when only mobile/metered data is available</string>
+    <string name="settings_backup_charging_only">While Charging Only</string>
+    <string name="settings_backup_charging_only_sub">Require charger connected before starting scheduled backups</string>
+    <string name="settings_backup_now">Back Up Now</string>
+    <string name="settings_backup_add_custom">Add Custom Folder</string>
+    <string name="settings_backup_regrant">Re-grant Access</string>
+    <string name="settings_backup_remove_title">Remove Backup Folder</string>
+    <string name="settings_backup_remove_msg">Removing \'%1$s\' stops future automatic backups from this folder. Files already backed up to your Cloudyte drives will NOT be deleted.</string>
     <string name="settings_exclusions">Exclusions</string>
-    <string name="settings_exclusions_sub">Manage file exclusion rules and patterns</string>
+    <string name="settings_exclusions_sub">Manage folder, file, hidden, extension, MIME, pattern &amp; size rules</string>
     <string name="settings_max_file_size">Max File Size</string>
     <string name="settings_network_type">Network Type</string>
-    <string name="settings_delete_after_upload">Delete After Upload</string>
+    <string name="settings_delete_after_upload">Delete Local Copy After Upload</string>
+    <string name="settings_delete_after_upload_sub">Deletes local file ONLY after upload completion is verified; local deletion failures are reported separately</string>
+    <string name="settings_delete_after_upload_confirm_title">Delete Local Copies After Upload?</string>
+    <string name="settings_delete_after_upload_confirm_msg">Local files will be kept untouched during upload and deleted ONLY after the cloud upload is verified complete. Exclusions and failed uploads are never deleted.</string>
 
     <!-- Storage Section -->
-    <string name="settings_cache_size">Cache Size</string>
+    <string name="settings_cache_size">App Cache</string>
     <string name="settings_clear_cache">Clear Cache</string>
-    <string name="settings_clear_cache_confirm">Are you sure you want to clear all thumbnail and HTTP cache?</string>
-    <string name="settings_downloads_info">Offline Downloads</string>
+    <string name="settings_clear_cache_confirm">Clear %1$s of temporary preview, image memory/disk, HTTP, decrypted viewer, and stale staging cache? Downloaded offline files and remote cloud files will not be deleted.</string>
+    <string name="settings_clear_thumbnails">Clear Thumbnails</string>
+    <string name="settings_clear_thumbnails_confirm">Clear %1$d cached thumbnails (%2$s)? Your saved offline files and remote cloud files stay safe.</string>
+    <string name="settings_downloads_info">Saved Offline &amp; Downloads</string>
     <string name="settings_clear_downloads">Clear Downloads</string>
-    <string name="settings_clear_downloads_confirm">Are you sure you want to delete all offline saved files?</string>
+    <string name="settings_clear_downloads_confirm">Delete %1$d saved offline and exported download files (%2$s) from this device? Files on your remote cloud drives will NOT be deleted.</string>
     <string name="settings_download_directory">Download Directory</string>
     <string name="settings_auto_clean_cache">Auto-Clean Cache</string>
-    <string name="settings_all_cache_cleared">All cache cleared</string>
+    <string name="settings_max_cache_size">Max Cache Size</string>
+    <string name="settings_all_cache_cleared">Cache cleared</string>
 
     <!-- Permissions Section -->
     <string name="settings_perm_media">Media &amp; Storage Permission</string>
@@ -209,23 +227,26 @@
 
     <!-- Playback Section -->
     <string name="settings_stream_before_download">Stream Before Download</string>
+    <string name="settings_stream_before_download_sub">Stream remote audio and video directly when offline copy is unavailable</string>
     <string name="settings_background_audio">Background Audio Playback</string>
+    <string name="settings_background_audio_sub">Keep audio playing in a foreground media session when leaving the player</string>
     <string name="settings_auto_play_video">Auto-play Video</string>
-    <string name="settings_audio_crossfade">Audio Crossfade</string>
-    <string name="settings_audio_crossfade_label">%1$d sec</string>
+    <string name="settings_auto_play_video_sub">Start video playback automatically when opening the player</string>
 
     <!-- Notifications Section -->
     <string name="settings_enable_notifications">Enable Notifications</string>
+    <string name="settings_backup_alerts">Backup Alerts</string>
     <string name="settings_progress_alerts">Progress Alerts</string>
     <string name="settings_failure_alerts">Failure Alerts</string>
     <string name="settings_completed_alerts">Completed Alerts</string>
-    <string name="settings_sound">Sound</string>
-    <string name="settings_vibration">Vibration</string>
+    <string name="settings_system_channel_settings">System Sound &amp; Channel Settings</string>
+    <string name="settings_system_channel_settings_sub">Configure sound, vibration, and alert priority in Android settings</string>
 
     <!-- Advanced Section -->
-    <string name="settings_transfer_concurrency">Transfer Concurrency</string>
-    <string name="settings_max_retries">Max Retries</string>
+    <string name="settings_max_retries">Max Automatic Retries</string>
     <string name="settings_metered_transfers">Metered Network Transfers</string>
+    <string name="settings_roaming_transfers">Allow Roaming Transfers</string>
+    <string name="settings_roaming_transfers_sub">Allow background transfers while roaming on cellular networks</string>
     <string name="settings_debug_logging">Debug Logging</string>
     <string name="settings_export_logs">Export / View Sync Logs</string>
     <string name="settings_reset_all">Reset All Settings</string>
@@ -235,8 +256,6 @@
     <!-- About Section -->
     <string name="settings_app_version">App Version</string>
     <string name="settings_app_version_sub">v1.0.0 (Build 100)</string>
-    <string name="settings_check_updates">Check for Updates</string>
-    <string name="settings_updates_up_to_date">App is up to date!</string>
     <string name="settings_terms_of_service">Terms of Service</string>
     <string name="settings_privacy_policy">Privacy Policy</string>
     <string name="settings_open_source_licenses">Open Source Licenses</string>
@@ -245,8 +264,10 @@
     <string name="exclusions_title">Exclusions</string>
     <string name="exclusions_empty">No exclusion rules added yet</string>
     <string name="exclusions_add_dialog_title">Add Exclusion Rule</string>
-    <string name="exclusions_pattern_hint">Pattern (e.g. *.tmp, .DS_Store, cache/*)</string>
+    <string name="exclusions_pattern_hint">Pattern, path, extension, or MIME type</string>
     <string name="exclusions_is_regex">Is Regular Expression (Regex)</string>
+    <string name="exclusions_delete_title">Remove Exclusion Rule</string>
+    <string name="exclusions_delete_msg">Remove rule \'%1$s\'? Matching files will no longer be skipped on future backup scans.</string>
 
     <!-- Transfers Screen -->
     <string name="transfers_title">Transfers</string>

@@ -832,6 +832,10 @@ fun FilesScreen(
 
     val prefsState by UserPreferences.observe(context).collectAsStateWithLifecycle(initialValue = UserPreferencesState())
     val isGridView = prefsState.viewMode == ViewMode.GRID
+    val isCompactDensity = prefsState.layoutDensity.equals("COMPACT", ignoreCase = true) ||
+        prefsState.viewMode == ViewMode.COMPACT_LIST
+    val gridSpacing = if (isCompactDensity) 8.dp else 16.dp
+    val listSpacing = if (isCompactDensity) 4.dp else 8.dp
 
     // 2 columns by default matching the original screenshot, or user's gridColumns preference
     val gridCells = remember(prefsState.gridColumns) {
@@ -1459,13 +1463,13 @@ fun FilesScreen(
                         state = gridState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
-                            start = 16.dp,
-                            end = 16.dp,
-                            top = 8.dp,
+                            start = if (isCompactDensity) 12.dp else 16.dp,
+                            end = if (isCompactDensity) 12.dp else 16.dp,
+                            top = if (isCompactDensity) 4.dp else 8.dp,
                             bottom = LocalBottomBarInset.current + 128.dp
                         ),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        horizontalArrangement = Arrangement.spacedBy(gridSpacing),
+                        verticalArrangement = Arrangement.spacedBy(gridSpacing)
                     ) {
                         // Drive & Breadcrumbs indicator row (`[Cloud] TG Drive`)
                         item(span = { GridItemSpan(maxLineSpan) }, key = "drive_breadcrumb_header") {
@@ -1500,6 +1504,7 @@ fun FilesScreen(
                                     folder = folder,
                                     navController = rootNavController,
                                     accountId = effectiveAccountId,
+                                    isCompact = isCompactDensity,
                                     isSelected = selectedFileIds.contains(folder.effectiveId),
                                     isSelectionMode = isSelectionMode,
                                     onToggleSelect = { toggleSelection(folder.effectiveId) },
@@ -1528,6 +1533,7 @@ fun FilesScreen(
                                     file = file,
                                     navController = rootNavController,
                                     accountId = effectiveAccountId,
+                                    isCompact = isCompactDensity,
                                     isSelected = selectedFileIds.contains(file.effectiveId),
                                     isSelectionMode = isSelectionMode,
                                     onToggleSelect = { toggleSelection(file.effectiveId) },
@@ -1566,12 +1572,12 @@ fun FilesScreen(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
-                            start = 16.dp,
-                            end = 16.dp,
-                            top = 8.dp,
+                            start = if (isCompactDensity) 12.dp else 16.dp,
+                            end = if (isCompactDensity) 12.dp else 16.dp,
+                            top = if (isCompactDensity) 4.dp else 8.dp,
                             bottom = LocalBottomBarInset.current + 128.dp
                         ),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(listSpacing)
                     ) {
                         item(key = "drive_breadcrumb_header") {
                             DriveAndBreadcrumbRow(
@@ -1612,6 +1618,7 @@ fun FilesScreen(
                                     file = folder,
                                     navController = rootNavController,
                                     accountId = effectiveAccountId,
+                                    isCompact = isCompactDensity,
                                     isSelected = selectedFileIds.contains(folder.effectiveId),
                                     isSelectionMode = isSelectionMode,
                                     onToggleSelect = { toggleSelection(folder.effectiveId) },
@@ -1648,6 +1655,7 @@ fun FilesScreen(
                                     file = file,
                                     navController = rootNavController,
                                     accountId = effectiveAccountId,
+                                    isCompact = isCompactDensity,
                                     isSelected = selectedFileIds.contains(file.effectiveId),
                                     isSelectionMode = isSelectionMode,
                                     onToggleSelect = { toggleSelection(file.effectiveId) },
@@ -2128,6 +2136,7 @@ fun FolderGridItem(
     accountId: String,
     modifier: Modifier = Modifier,
     isSelected: Boolean = false,
+    isCompact: Boolean = false,
     isSelectionMode: Boolean = false,
     onToggleSelect: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null,
@@ -2144,7 +2153,7 @@ fun FolderGridItem(
     )
 
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(if (isCompact) 12.dp else 16.dp),
         colors = CardDefaults.cardColors(containerColor = cardBg),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = modifier
@@ -2168,7 +2177,7 @@ fun FolderGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1.15f)
+                    .aspectRatio(if (isCompact) 1.45f else 1.15f)
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
                 contentAlignment = Alignment.Center
             ) {
@@ -2176,7 +2185,7 @@ fun FolderGridItem(
                     imageVector = Icons.Default.Folder,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(44.dp)
+                    modifier = Modifier.size(if (isCompact) 36.dp else 44.dp)
                 )
 
                 if (folder.isEncrypted) {
@@ -2314,6 +2323,7 @@ fun FileGridItem(
     accountId: String,
     modifier: Modifier = Modifier,
     isSelected: Boolean = false,
+    isCompact: Boolean = false,
     isSelectionMode: Boolean = false,
     onToggleSelect: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null,
@@ -2331,7 +2341,7 @@ fun FileGridItem(
     )
 
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(if (isCompact) 12.dp else 16.dp),
         colors = CardDefaults.cardColors(containerColor = cardBg),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = modifier
@@ -2355,7 +2365,7 @@ fun FileGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1.15f)
+                    .aspectRatio(if (isCompact) 1.45f else 1.15f)
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
             ) {
                 FileThumb(
@@ -2508,6 +2518,7 @@ fun FileRow(
     accountId: String,
     modifier: Modifier = Modifier,
     isSelected: Boolean = false,
+    isCompact: Boolean = false,
     isSelectionMode: Boolean = false,
     onToggleSelect: (() -> Unit)? = null,
     onClick: (() -> Unit)? = null,
@@ -2530,7 +2541,7 @@ fun FileRow(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 64.dp)
+            .heightIn(min = if (isCompact) 52.dp else 64.dp)
             .combinedClickable(
                 onClick = {
                     if (isSelectionMode && onToggleSelect != null) {
@@ -2548,7 +2559,10 @@ fun FileRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(
+                    horizontal = if (isCompact) 10.dp else 12.dp,
+                    vertical = if (isCompact) 4.dp else 8.dp
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (isSelected) {
@@ -2572,21 +2586,21 @@ fun FileRow(
             FileThumb(
                 file = file,
                 accountId = accountId,
-                sizeDp = 48.dp,
-                cornerRadius = 12.dp
+                sizeDp = if (isCompact) 36.dp else 48.dp,
+                cornerRadius = if (isCompact) 8.dp else 12.dp
             )
 
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(if (isCompact) 10.dp else 12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = file.effectiveName,
                     style = MaterialTheme.typography.bodyMedium,
                     fontSize = 13.sp,
-                    lineHeight = 17.sp,
+                    lineHeight = if (isCompact) 15.sp else 17.sp,
                     fontWeight = FontWeight.Normal,
                     color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
+                    maxLines = if (isCompact) 1 else 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(2.dp))

@@ -18,9 +18,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LocalFolderSyncMeta::class,
         LocalFileMutation::class,
         LocalFileTombstone::class,
-        ThumbnailEntity::class
+        ThumbnailEntity::class,
+        BackupSourceEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -35,6 +36,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun fileTombstoneDao(): FileTombstoneDao
     abstract fun thumbnailDao(): ThumbnailDao
     abstract fun transferQueueDao(): TransferQueueDao
+    abstract fun backupSourceDao(): BackupSourceDao
 
     companion object {
         @Volatile
@@ -279,6 +281,39 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS backup_sources (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        treeUri TEXT NOT NULL,
+                        displayName TEXT NOT NULL,
+                        presetType TEXT NOT NULL DEFAULT 'CUSTOM',
+                        targetAccountId TEXT DEFAULT NULL,
+                        targetFolderId TEXT DEFAULT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        permissionStatus TEXT NOT NULL DEFAULT 'UNKNOWN',
+                        lastScanAt INTEGER NOT NULL DEFAULT 0,
+                        lastBackupAt INTEGER NOT NULL DEFAULT 0,
+                        lastSummary TEXT DEFAULT NULL,
+                        lastError TEXT DEFAULT NULL,
+                        lastQueuedCount INTEGER NOT NULL DEFAULT 0,
+                        lastSkippedCount INTEGER NOT NULL DEFAULT 0,
+                        lastFailedCount INTEGER NOT NULL DEFAULT 0,
+                        createdAt INTEGER NOT NULL DEFAULT 0,
+                        updatedAt INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_backup_sources_treeUri ON backup_sources(treeUri)")
+                db.execSQL("ALTER TABLE exclusions ADD COLUMN ruleType TEXT NOT NULL DEFAULT 'PATH_PATTERN'")
+                db.execSQL("ALTER TABLE exclusions ADD COLUMN sizeLimitBytes INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE exclusions ADD COLUMN sourceUri TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE upload_records ADD COLUMN contentHash TEXT DEFAULT NULL")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -298,7 +333,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_10_11,
                         MIGRATION_11_12,
                         MIGRATION_12_13,
-                        MIGRATION_13_14
+                        MIGRATION_13_14,
+                        MIGRATION_14_15
                     )
                     .build()
                 INSTANCE = instance

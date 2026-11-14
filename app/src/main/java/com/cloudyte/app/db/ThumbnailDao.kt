@@ -25,6 +25,9 @@ interface ThumbnailDao {
     @Query("DELETE FROM thumbnail_cache WHERE accountId = :accountId")
     suspend fun deleteForAccount(accountId: String)
 
+    @Query("DELETE FROM thumbnail_cache")
+    suspend fun deleteAll()
+
     @Query("SELECT COALESCE(SUM(sizeBytes), 0) FROM thumbnail_cache")
     suspend fun totalBytes(): Long
 

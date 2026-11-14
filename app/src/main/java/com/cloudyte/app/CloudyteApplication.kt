@@ -12,6 +12,8 @@ import com.cloudyte.app.core.cache.CacheCleanupWorker
 
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class CloudyteApplication : Application(), ImageLoaderFactory {
     lateinit var container: AppContainer
@@ -28,10 +30,15 @@ class CloudyteApplication : Application(), ImageLoaderFactory {
         try {
             container.transferScheduler.schedulePeriodicMaintenance()
             WorkMaintenanceScheduler.scheduleMaintenance(this)
-            CacheCleanupWorker.schedule(this)
             container.transferScheduler.kick(ScheduleReason.APP_START, allowMetered = true)
         } catch (error: IllegalStateException) {
             Log.w("CloudyteApplication", "WorkManager is not initialized; startup queue work will be scheduled on the next trigger", error)
+        }
+        container.applicationScope.launch(container.dispatchers.io) {
+            runCatching {
+                val prefs = com.cloudyte.app.data.UserPreferences.observe(this@CloudyteApplication).first()
+                CacheCleanupWorker.syncSchedule(this@CloudyteApplication, prefs.autoCleanCache)
+            }
         }
     }
 

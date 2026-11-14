@@ -1,13 +1,14 @@
 package com.cloudyte.app.core.cache
 
 import android.content.Context
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkerParameters
-import androidx.work.Constraints
 import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import com.cloudyte.app.data.UserPreferences
 import com.cloudyte.app.db.AppDatabase
 import kotlinx.coroutines.flow.first
 import java.util.concurrent.TimeUnit
@@ -18,9 +19,17 @@ class CacheCleanupWorker(
 ) : CoroutineWorker(appContext, workerParams) {
     override suspend fun doWork(): Result {
         return try {
+            val prefs = UserPreferences.observe(applicationContext).first()
             val db = AppDatabase.getDatabase(applicationContext)
-            ThumbnailStore(applicationContext, db.thumbnailDao()).enforceQuota()
-            PreviewStore(applicationContext).enforceQuota()
+
+            if (prefs.autoCleanCache) {
+                val totalQuotaBytes = prefs.maxCacheSizeMb.toLong().coerceAtLeast(32L) * 1024L * 1024L
+                val thumbQuotaBytes = (totalQuotaBytes * 6L) / 10L
+                val previewQuotaBytes = (totalQuotaBytes * 4L) / 10L
+                ThumbnailStore(applicationContext, db.thumbnailDao()).enforceQuota(thumbQuotaBytes)
+                PreviewStore(applicationContext).enforceQuota(previewQuotaBytes)
+            }
+
             val activeIds = runCatching {
                 db.transferDao().observeActiveTransfers().first().map { it.id }.toSet()
             }.getOrDefault(emptySet())
@@ -33,6 +42,15 @@ class CacheCleanupWorker(
 
     companion object {
         const val UNIQUE_WORK_NAME = "cloudyte_cache_cleanup"
+
+        fun syncSchedule(context: Context, enabled: Boolean) {
+            val wm = WorkManager.getInstance(context.applicationContext)
+            if (!enabled) {
+                runCatching { wm.cancelUniqueWork(UNIQUE_WORK_NAME) }
+                return
+            }
+            schedule(context)
+        }
 
         fun schedule(context: Context) {
             val request = PeriodicWorkRequestBuilder<CacheCleanupWorker>(24, TimeUnit.HOURS)

@@ -1,7 +1,5 @@
 package com.cloudyte.app.core.transfer.notification
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -14,28 +12,40 @@ object TransferNotification {
     const val CHANNEL_NAME = "Cloudyte transfers"
     const val NOTIFICATION_ID = 2001
 
-    fun foregroundInfo(context: Context, transferred: Long, total: Long, currentFile: String? = null): ForegroundInfo {
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "Upload and download progress"
-                }
-            )
+    fun foregroundInfo(
+        context: Context,
+        transferred: Long,
+        total: Long,
+        currentFile: String? = null,
+        showDetailedProgress: Boolean = true
+    ): ForegroundInfo {
+        NotificationHelper.ensureChannels(context)
+        val title = if (showDetailedProgress && currentFile != null) {
+            "Transferring $currentFile"
+        } else {
+            "Cloudyte transfers"
         }
-        val title = currentFile?.let { "Transferring $it" } ?: "Cloudyte transfers"
+        val text = if (!showDetailedProgress) {
+            "Transfer queue active"
+        } else if (total > 0L) {
+            "${transferred.coerceAtLeast(0L)} of $total bytes"
+        } else {
+            "Working through transfer queue"
+        }
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
-            .setContentText(if (total > 0L) "${transferred.coerceAtLeast(0L)} of $total bytes" else "Working through transfer queue")
+            .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .apply {
-                if (total > 0L) {
+                if (showDetailedProgress && total > 0L) {
                     val progress = ((transferred.coerceAtLeast(0L).toDouble() / total.toDouble()) * 1000).toInt().coerceIn(0, 1000)
                     setProgress(1000, progress, false)
-                } else setProgress(0, 0, true)
+                } else {
+                    setProgress(0, 0, showDetailedProgress)
+                }
             }
             .build()
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

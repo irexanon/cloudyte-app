@@ -25,7 +25,8 @@ data class NetworkPolicySnapshot(
     val batterySaverActive: Boolean,
     val isRoaming: Boolean = false,
     val isCharging: Boolean = false,
-    val batteryNotLow: Boolean = true
+    val batteryNotLow: Boolean = true,
+    val requireWifiForBackup: Boolean = !allowMeteredTransfers
 )
 
 interface NetworkMonitor {
@@ -70,7 +71,7 @@ class DefaultNetworkPolicy : NetworkPolicy {
         if (!isBackup && snapshot.status == NetworkStatus.VALIDATED_METERED && !snapshot.allowMeteredTransfers) {
             return PolicyDecision.WaitingForNetwork("METERED_NETWORK_DISABLED")
         }
-        if (isBackup && snapshot.status == NetworkStatus.VALIDATED_METERED && !snapshot.allowMeteredTransfers) {
+        if (isBackup && snapshot.status == NetworkStatus.VALIDATED_METERED && snapshot.requireWifiForBackup) {
             return PolicyDecision.WaitingForNetwork("BACKUP_WIFI_ONLY")
         }
         return PolicyDecision.Allowed
@@ -112,7 +113,8 @@ class ConnectivityNetworkMonitor(private val context: Context) : NetworkMonitor 
             batterySaverActive = power?.isPowerSaveMode == true,
             isRoaming = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING) == false,
             isCharging = battery?.isCharging == true,
-            batteryNotLow = batteryLevel < 0 || batteryLevel >= 15
+            batteryNotLow = batteryLevel < 0 || batteryLevel >= 15,
+            requireWifiForBackup = preferences.backupWifiOnly
         )
     }
 

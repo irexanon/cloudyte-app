@@ -14,5 +14,6 @@ data class LocalUploadRecord(
     val targetFolderId: String,
     val cloudFileId: String? = null,
     val uploadedAt: Long = System.currentTimeMillis(),
-    val status: String = "SUCCESS" // "SUCCESS", "FAILED"
+    val status: String = "SUCCESS", // "SUCCESS", "FAILED"
+    val contentHash: String? = null
 )

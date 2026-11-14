@@ -10,6 +10,7 @@ class BootRecoveryReceiver : BroadcastReceiver() {
             intent?.action == Intent.ACTION_LOCKED_BOOT_COMPLETED) {
             WorkMaintenanceScheduler.scheduleBootRecovery(context)
             WorkMaintenanceScheduler.scheduleMaintenance(context)
+            com.cloudyte.app.sync.AutoSyncManager.requestReschedule(context)
         }
     }
 }

@@ -59,7 +59,11 @@ class CloudTransferOperationExecutor @JvmOverloads constructor(
     },
     private val shouldEncryptOfflineFiles: suspend () -> Boolean = {
         runCatching { UserPreferences.observe(context).first().isOfflineEncryptionEnabled }.getOrDefault(false)
-    }
+    },
+    private val shouldDeleteAfterBackupUpload: suspend () -> Boolean = {
+        runCatching { UserPreferences.observe(context).first().deleteAfterUpload }.getOrDefault(false)
+    },
+    private val onLocalDeletionFailed: (suspend (LocalTransfer, String) -> Unit)? = null
 ) : TransferOperationExecutor {
 
     override suspend fun onCompleted(transfer: LocalTransfer) {
@@ -73,14 +77,115 @@ class CloudTransferOperationExecutor @JvmOverloads constructor(
             transferId = transfer.id,
             removePartFile = true
         )
-        val uri = Uri.parse(transfer.localUri ?: return)
-        if (uri.scheme != "file") return
-        val file = File(uri.path ?: return)
-        val queueDirectory = File(context.filesDir, "queued-text").canonicalFile
-        val canonical = file.canonicalFile
-        if (canonical.name.startsWith("cloudyte-queued-text-") && canonical.parentFile == queueDirectory) {
-            canonical.delete()
+        val rawUri = transfer.localUri ?: transfer.localPath ?: return
+        val uri = Uri.parse(rawUri)
+        if (uri.scheme == "file") {
+            val filePath = uri.path
+            if (!filePath.isNullOrBlank()) {
+                val file = File(filePath)
+                val queueDirectory = File(context.filesDir, "queued-text").canonicalFile
+                val canonical = file.canonicalFile
+                if (canonical.name.startsWith("cloudyte-queued-text-") && canonical.parentFile == queueDirectory) {
+                    canonical.delete()
+                    return
+                }
+            }
         }
+
+        if (transfer.direction != TransferDirection.DOWNLOAD.name) {
+            val plaintextSize = transfer.plaintextSizeBytes ?: transfer.totalBytes
+            val lastModified = resolveSourceLastModified(uri, transfer.createdAt)
+            val contentHash = if (!transfer.isEncrypted && !transfer.checksum.isNullOrBlank()) {
+                transfer.checksum
+            } else {
+                computeSha256Safely(uri)
+            }
+            runCatching {
+                database.uploadRecordDao().insertRecord(
+                    com.cloudyte.app.db.LocalUploadRecord(
+                        localUri = rawUri,
+                        fileName = transfer.fileName,
+                        fileSize = plaintextSize,
+                        lastModified = lastModified,
+                        targetAccountId = transfer.accountId,
+                        targetFolderId = transfer.parentFolderId ?: transfer.remotePath ?: "root",
+                        cloudFileId = transfer.remoteId ?: transfer.fileId,
+                        uploadedAt = System.currentTimeMillis(),
+                        status = "SUCCESS",
+                        contentHash = contentHash
+                    )
+                )
+            }
+        }
+
+        if (transfer.direction == TransferDirection.BACKUP.name && runCatching { shouldDeleteAfterBackupUpload() }.getOrDefault(false)) {
+            deleteEligibleLocalBackupSource(transfer, uri)
+        }
+    }
+
+    private suspend fun deleteEligibleLocalBackupSource(transfer: LocalTransfer, uri: Uri) {
+        val scheme = uri.scheme
+        if (scheme == "file" || scheme.isNullOrBlank()) {
+            val path = if (scheme == "file") uri.path.orEmpty() else uri.toString()
+            if (path.isBlank()) return
+            val file = File(path)
+            val canonical = runCatching { file.canonicalFile }.getOrDefault(file)
+            val appFiles = runCatching { context.filesDir.canonicalFile }.getOrNull()
+            val appCache = runCatching { context.cacheDir.canonicalFile }.getOrNull()
+            if ((appFiles != null && canonical.path.startsWith(appFiles.path)) ||
+                (appCache != null && canonical.path.startsWith(appCache.path))
+            ) {
+                return
+            }
+            if (!file.exists() || !file.isFile) return
+            val deleted = runCatching { file.delete() }.getOrDefault(false)
+            if (!deleted) {
+                val reason = "Could not delete local file '${transfer.fileName}' after verified upload."
+                com.cloudyte.app.sync.SyncLogger.log(reason, com.cloudyte.app.sync.SyncLogLevel.WARNING)
+                runCatching { onLocalDeletionFailed?.invoke(transfer, reason) }
+            } else {
+                com.cloudyte.app.sync.SyncLogger.log("Deleted local copy after verified upload: '${transfer.fileName}'.", com.cloudyte.app.sync.SyncLogLevel.INFO)
+            }
+            return
+        }
+
+        if (scheme == "content") {
+            val result = runCatching {
+                val doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, uri)
+                    ?: throw IOException("Local document URI is unavailable")
+                if (!doc.exists()) return
+                if (!doc.delete()) throw IOException("Provider refused local file deletion")
+                true
+            }
+            result.onSuccess {
+                com.cloudyte.app.sync.SyncLogger.log("Deleted local copy after verified upload: '${transfer.fileName}'.", com.cloudyte.app.sync.SyncLogLevel.INFO)
+            }.onFailure { err ->
+                val reason = "Uploaded '${transfer.fileName}', but failed to delete local copy: ${err.message ?: "permission or provider error"}"
+                com.cloudyte.app.sync.SyncLogger.log(reason, com.cloudyte.app.sync.SyncLogLevel.WARNING)
+                runCatching { onLocalDeletionFailed?.invoke(transfer, reason) }
+            }
+        }
+    }
+
+    private fun computeSha256Safely(uri: Uri): String? {
+        return runCatching {
+            val stream = if (uri.scheme == "file" || uri.scheme.isNullOrBlank()) {
+                val path = if (uri.scheme == "file") uri.path.orEmpty() else uri.toString()
+                File(path).takeIf { it.isFile }?.inputStream()
+            } else {
+                context.contentResolver.openInputStream(uri)
+            } ?: return null
+            stream.use { input ->
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    digest.update(buffer, 0, read)
+                }
+                digest.digest().joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            }
+        }.getOrNull()
     }
 
     override suspend fun onCancelled(transfer: LocalTransfer) {

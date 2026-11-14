@@ -148,4 +148,4 @@ private fun SummaryRow(label: String, value: String) {
     }
 }
 
-private const val CURRENT_SCHEMA_VERSION = 13
+private const val CURRENT_SCHEMA_VERSION = 15

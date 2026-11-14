@@ -1,19 +1,17 @@
 package com.cloudyte.app.api
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
-import androidx.core.content.FileProvider
+import com.cloudyte.app.data.UserPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.Request
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 
@@ -37,35 +35,76 @@ object OfflineFileManager {
         }
     }
 
-    private fun getVaultDir(context: Context): File {
+    fun getInternalVaultDir(context: Context): File {
         val dir = File(context.filesDir, OFFLINE_DIR_NAME)
-        if (!dir.exists()) {
-            dir.mkdirs()
-        }
+        if (!dir.exists()) dir.mkdirs()
         return dir
+    }
+
+    fun getExternalVaultDir(context: Context): File? {
+        val ext = context.getExternalFilesDir(OFFLINE_DIR_NAME) ?: return null
+        if (!ext.exists()) ext.mkdirs()
+        return ext
+    }
+
+    fun getAllVaultDirs(context: Context): List<File> {
+        val list = mutableListOf(getInternalVaultDir(context))
+        getExternalVaultDir(context)?.let { ext ->
+            if (ext.absolutePath != list.first().absolutePath) {
+                list += ext
+            }
+        }
+        return list
+    }
+
+    suspend fun getPreferredVaultDir(context: Context): File {
+        val pref = runCatching {
+            UserPreferences.observe(context).first().downloadDirectory
+        }.getOrDefault("INTERNAL")
+        return if (pref.equals("EXTERNAL", ignoreCase = true)) {
+            getExternalVaultDir(context) ?: getInternalVaultDir(context)
+        } else {
+            getInternalVaultDir(context)
+        }
+    }
+
+    fun getPreferredVaultDirSync(context: Context, directorySetting: String): File {
+        return if (directorySetting.equals("EXTERNAL", ignoreCase = true)) {
+            getExternalVaultDir(context) ?: getInternalVaultDir(context)
+        } else {
+            getInternalVaultDir(context)
+        }
     }
 
     private fun sanitizeFileName(name: String): String {
         return name.replace(Regex("[^a-zA-Z0-9._-]"), "_")
     }
 
-    fun getLocalFile(context: Context, accountId: String, fileId: String, fileName: String): File {
+    fun getLocalFile(
+        context: Context,
+        accountId: String,
+        fileId: String,
+        fileName: String,
+        vaultDir: File = getInternalVaultDir(context)
+    ): File {
         val safeAcc = sanitizeFileName(accountId)
         val safeFid = sanitizeFileName(fileId)
         val safeName = sanitizeFileName(fileName)
-        return File(getVaultDir(context), "${safeAcc}_${safeFid}_$safeName")
+        return File(vaultDir, "${safeAcc}_${safeFid}_$safeName")
     }
 
     fun findOfflineFile(context: Context, accountId: String, fileId: String): File? {
         val safeAcc = sanitizeFileName(accountId)
         val safeFid = sanitizeFileName(fileId)
         val prefix = "${safeAcc}_${safeFid}_"
-        val dir = getVaultDir(context)
-        val matches = dir.listFiles { _, name ->
-            name.startsWith(prefix) && !name.endsWith(".tmp") && !name.endsWith(".part")
+        for (dir in getAllVaultDirs(context)) {
+            val matches = dir.listFiles { _, name ->
+                name.startsWith(prefix) && !name.endsWith(".tmp") && !name.endsWith(".part")
+            }
+            val found = matches?.firstOrNull { it.exists() && it.length() > 0 }
+            if (found != null) return found
         }
-        val found = matches?.firstOrNull { it.exists() && it.length() > 0 }
-        return found
+        return null
     }
 
     fun isDownloaded(context: Context, accountId: String, fileId: String): Boolean {
@@ -87,26 +126,21 @@ object OfflineFileManager {
     }
 
     fun refreshDownloadedSet(context: Context) {
-        val dir = getVaultDir(context)
-        val files = dir.listFiles { _, name -> !name.endsWith(".tmp") && !name.endsWith(".part") } ?: emptyArray()
         val set = mutableSetOf<String>()
-        for (f in files) {
-            if (f.length() > 0) {
-                // filename is format: ${accountId}_${fileId}_${name}
-                val parts = f.name.split("_")
-                if (parts.size >= 3) {
-                    val fid = parts[1]
-                    set.add(fid)
+        for (dir in getAllVaultDirs(context)) {
+            val files = dir.listFiles { _, name -> !name.endsWith(".tmp") && !name.endsWith(".part") } ?: emptyArray()
+            for (f in files) {
+                if (f.length() > 0) {
+                    val parts = f.name.split("_")
+                    if (parts.size >= 3) {
+                        set.add(parts[1])
+                    }
                 }
             }
         }
         _downloadedFiles.value = set
     }
 
-    /**
-     * Automatically downloads file for offline availability when viewed.
-     * Non-blocking background coroutine.
-     */
     fun autoCacheOnView(context: Context, accountId: String, file: CloudFile) {
         val fid = file.effectiveId
         if (fid.isEmpty() || file.isFolderItem) return
@@ -123,9 +157,6 @@ object OfflineFileManager {
         }
     }
 
-    /**
-     * Downloads file to offline storage with progress tracking.
-     */
     suspend fun downloadFile(
         context: Context,
         accountId: String,
@@ -134,7 +165,15 @@ object OfflineFileManager {
     ): Result<File> = withContext(Dispatchers.IO) {
         val fid = file.effectiveId
         val fileName = file.effectiveName.ifBlank { "file_${fid}" }
-        val targetFile = getLocalFile(context, accountId, fid, fileName)
+        val existing = findOfflineFile(context, accountId, fid)
+        if (existing != null && existing.exists() && existing.length() > 0) {
+            _downloadedFiles.value = _downloadedFiles.value + fid
+            onProgress?.invoke(1f)
+            return@withContext Result.success(existing)
+        }
+
+        val vaultDir = getPreferredVaultDir(context)
+        val targetFile = getLocalFile(context, accountId, fid, fileName, vaultDir)
 
         if (targetFile.exists() && targetFile.length() > 0) {
             _downloadedFiles.value = _downloadedFiles.value + fid
@@ -143,13 +182,12 @@ object OfflineFileManager {
         }
 
         if (!downloadingSet.add(fid)) {
-            // Already in progress
             return@withContext Result.failure(Exception("Download already in progress"))
         }
 
         _activeDownloads.value = _activeDownloads.value + (fid to 0f)
 
-        val tempFile = File(getVaultDir(context), "${targetFile.name}.tmp")
+        val tempFile = File(vaultDir, "${targetFile.name}.tmp")
         try {
             if (tempFile.exists()) tempFile.delete()
             val app = context.applicationContext as? com.cloudyte.app.CloudyteApplication
@@ -190,7 +228,10 @@ object OfflineFileManager {
             } ?: throw IOException("Download is still queued; try again shortly")
             if (completed && tempFile.exists()) {
                 if (targetFile.exists()) targetFile.delete()
-                if (!tempFile.renameTo(targetFile)) throw IOException("Failed to promote downloaded file into offline storage")
+                if (!tempFile.renameTo(targetFile)) {
+                    tempFile.copyTo(targetFile, overwrite = true)
+                    tempFile.delete()
+                }
                 _downloadedFiles.value = _downloadedFiles.value + fid
                 _activeDownloads.value = _activeDownloads.value - fid
                 downloadingSet.remove(fid)
@@ -207,10 +248,6 @@ object OfflineFileManager {
         }
     }
 
-    /**
-     * Ensures that a file (especially an encrypted file or an offline file stored encrypted at rest)
-     * is downloaded, authenticated, and decrypted to a controlled local file before opening in a viewer/player.
-     */
     suspend fun prepareDecryptedFileForViewer(
         context: Context,
         accountId: String,
@@ -233,7 +270,6 @@ object OfflineFileManager {
             return@withContext Result.success(offlineFile)
         }
 
-        // Offline file is stored encrypted at rest (CYTE1 format); decrypt to controlled view cache
         val app = context.applicationContext as? com.cloudyte.app.CloudyteApplication
         val keyProvider = app?.container?.contentKeyManager
             ?: com.cloudyte.app.core.security.ContentKeyManager(context)
@@ -288,24 +324,35 @@ object OfflineFileManager {
     }
 
     fun getOfflineCacheSize(context: Context): Long {
-        val dir = getVaultDir(context)
         var total = 0L
-        dir.listFiles()?.forEach {
-            if (it.isFile) total += it.length()
+        for (dir in getAllVaultDirs(context)) {
+            dir.listFiles()?.forEach {
+                if (it.isFile) total += it.length()
+            }
         }
         return total
     }
 
     fun getOfflineCount(context: Context): Int {
-        val dir = getVaultDir(context)
-        return dir.listFiles { _, name -> !name.endsWith(".tmp") }?.count { it.length() > 0 } ?: 0
+        var count = 0
+        for (dir in getAllVaultDirs(context)) {
+            count += dir.listFiles { _, name -> !name.endsWith(".tmp") && !name.endsWith(".part") }
+                ?.count { it.isFile && it.length() > 0 }
+                ?: 0
+        }
+        return count
     }
 
-    fun clearAllOfflineCache(context: Context) {
-        val dir = getVaultDir(context)
-        dir.listFiles()?.forEach { it.delete() }
+    fun clearAllOfflineCache(context: Context): Int {
+        var deletedCount = 0
+        for (dir in getAllVaultDirs(context)) {
+            dir.listFiles()?.forEach { file ->
+                if (file.delete()) deletedCount++
+            }
+        }
         com.cloudyte.app.core.security.SecureFileCleanup.clearDecryptedViewCache(context)
         _downloadedFiles.value = emptySet()
         _activeDownloads.value = emptyMap()
+        return deletedCount
     }
 }

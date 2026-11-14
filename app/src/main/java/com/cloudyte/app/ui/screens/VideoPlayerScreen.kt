@@ -29,8 +29,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -41,8 +43,14 @@ import com.cloudyte.app.api.ApiClient
 import com.cloudyte.app.api.CloudFile
 import com.cloudyte.app.api.FileRepository
 import com.cloudyte.app.api.OfflineFileManager
+import com.cloudyte.app.data.UserPreferences
+import com.cloudyte.app.data.UserPreferencesState
 import com.cloudyte.app.ui.theme.MetricLabelTextStyle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 @OptIn(UnstableApi::class, ExperimentalMaterial3Api::class)
@@ -85,14 +93,22 @@ fun VideoPlayerScreen(
         ?: dbVideo
     val fileName = file?.effectiveName ?: "Video Player"
 
-    var isPlaying by remember { mutableStateOf(true) }
+    val initialPrefs = remember {
+        kotlinx.coroutines.runBlocking {
+            runCatching { UserPreferences.observe(context).first() }.getOrDefault(UserPreferencesState())
+        }
+    }
+    var isPlaying by remember { mutableStateOf(initialPrefs.autoPlayVideo) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var isBuffering by remember { mutableStateOf(true) }
+    var videoStatusNote by remember { mutableStateOf<String?>(null) }
     var showControls by remember { mutableStateOf(true) }
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var playbackSpeed by remember { mutableFloatStateOf(1f) }
     var showSpeedDialog by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    var attemptedDownloadFallback by remember(currentActiveFileId) { mutableStateOf(false) }
 
     val effectiveAccId = remember(accountId, file?.effectiveAccountId) {
         when {
@@ -102,52 +118,66 @@ fun VideoPlayerScreen(
         }
     }
 
-    // Auto-cache video for offline viewing in background
-    LaunchedEffect(currentActiveFileId, file, effectiveAccId) {
-        if (effectiveAccId.isNotBlank()) {
-            file?.let {
-                OfflineFileManager.autoCacheOnView(context, effectiveAccId, it)
-            }
-        }
-    }
-
     val exoPlayer = remember {
         val token = ApiClient.getToken()
         val headers = mutableMapOf<String, String>()
         if (!token.isNullOrEmpty()) {
             headers["Authorization"] = "Bearer $token"
         }
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
+        val httpFactory = DefaultHttpDataSource.Factory()
             .setDefaultRequestProperties(headers)
             .setAllowCrossProtocolRedirects(true)
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
 
         ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
     }
 
-    // Update media source when switching videos
-    LaunchedEffect(currentActiveFileId, effectiveAccId, file?.isEncrypted) {
+    // Update media source when switching videos, honoring streamBeforeDownload and autoPlayVideo
+    LaunchedEffect(currentActiveFileId, effectiveAccId, file?.isEncrypted, initialPrefs.streamBeforeDownload, initialPrefs.autoPlayVideo) {
         val acc = effectiveAccId.ifBlank { accountId }
         val mediaItem = if (file?.isEncrypted == true) {
-            val decrypted = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            isBuffering = true
+            videoStatusNote = "Decrypting video…"
+            val decrypted = withContext(Dispatchers.IO) {
                 OfflineFileManager.prepareDecryptedFileForViewer(context, acc, file).getOrNull()
             }
+            videoStatusNote = null
             if (decrypted != null && decrypted.exists() && decrypted.length() > 0) {
                 MediaItem.fromUri(Uri.fromFile(decrypted))
             } else {
+                isBuffering = false
                 null
             }
         } else {
             val offlineFile = if (acc.isNotBlank()) {
-                OfflineFileManager.findOfflineFile(context, acc, currentActiveFileId)
+                withContext(Dispatchers.IO) { OfflineFileManager.findOfflineFile(context, acc, currentActiveFileId) }
             } else null
             if (offlineFile != null && offlineFile.exists() && offlineFile.length() > 0) {
-                val prepared = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                videoStatusNote = null
+                val prepared = withContext(Dispatchers.IO) {
                     if (file != null) OfflineFileManager.prepareDecryptedFileForViewer(context, acc, file).getOrNull() else offlineFile
                 } ?: offlineFile
                 MediaItem.fromUri(Uri.fromFile(prepared))
+            } else if (!initialPrefs.streamBeforeDownload && file != null && acc.isNotBlank()) {
+                isBuffering = true
+                videoStatusNote = "Downloading before playback…"
+                val downloaded = withContext(Dispatchers.IO) {
+                    OfflineFileManager.downloadFile(context, acc, file).getOrNull()
+                }
+                videoStatusNote = null
+                if (downloaded != null && downloaded.exists() && downloaded.length() > 0) {
+                    MediaItem.fromUri(Uri.fromFile(downloaded))
+                } else {
+                    val url = ApiClient.getFileUrl(acc, currentActiveFileId, preview = true)
+                    MediaItem.fromUri(url)
+                }
             } else {
+                videoStatusNote = null
+                if (acc.isNotBlank() && file != null) {
+                    OfflineFileManager.autoCacheOnView(context, acc, file)
+                }
                 val url = ApiClient.getFileUrl(acc, currentActiveFileId, preview = true)
                 MediaItem.fromUri(url)
             }
@@ -155,7 +185,7 @@ fun VideoPlayerScreen(
         if (mediaItem != null) {
             exoPlayer.setMediaItem(mediaItem)
             exoPlayer.prepare()
-            exoPlayer.playWhenReady = true
+            exoPlayer.playWhenReady = initialPrefs.autoPlayVideo
         }
     }
 
@@ -169,6 +199,33 @@ fun VideoPlayerScreen(
                 isBuffering = (state == Player.STATE_BUFFERING)
                 if (state == Player.STATE_READY) {
                     duration = exoPlayer.duration.coerceAtLeast(0L)
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                if (!attemptedDownloadFallback && file != null && !file.isEncrypted) {
+                    attemptedDownloadFallback = true
+                    val acc = effectiveAccId.ifBlank { accountId }
+                    if (acc.isNotBlank()) {
+                        coroutineScope.launch {
+                            videoStatusNote = "Stream failed; downloading locally…"
+                            val downloaded = withContext(Dispatchers.IO) {
+                                OfflineFileManager.downloadFile(context, acc, file).getOrNull()
+                            }
+                            videoStatusNote = null
+                            if (downloaded != null && downloaded.exists() && downloaded.length() > 0) {
+                                exoPlayer.setMediaItem(MediaItem.fromUri(Uri.fromFile(downloaded)))
+                                exoPlayer.prepare()
+                                exoPlayer.playWhenReady = initialPrefs.autoPlayVideo
+                            } else {
+                                isBuffering = false
+                                videoStatusNote = error.localizedMessage ?: "Video playback failed"
+                            }
+                        }
+                    }
+                } else {
+                    isBuffering = false
+                    videoStatusNote = error.localizedMessage ?: "Video playback failed"
                 }
             }
         }
@@ -288,16 +345,34 @@ fun VideoPlayerScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Buffering Indicator
-        if (isBuffering) {
+        // Buffering / status Indicator
+        if (isBuffering || !videoStatusNote.isNullOrBlank()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                com.cloudyte.app.ui.components.AppLoadingIndicator(
-                    size = 52.dp,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (isBuffering) {
+                        com.cloudyte.app.ui.components.AppLoadingIndicator(
+                            size = 52.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    if (!videoStatusNote.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.7f),
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text(
+                                text = videoStatusNote.orEmpty(),
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
 

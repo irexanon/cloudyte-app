@@ -45,6 +45,37 @@ enum class SortDirection {
     DESC
 }
 
+enum class BackupMaxFileSizeOption(val mb: Int, val label: String) {
+    UNLIMITED(0, "Unlimited (no size limit)"),
+    MB_100(100, "100 MB (104,857,600 bytes)"),
+    MB_500(500, "500 MB (524,288,000 bytes)"),
+    GB_1(1024, "1 GB (1,024 MB)"),
+    GB_2(2048, "2 GB (2,048 MB)"),
+    GB_4(4096, "4 GB (4,096 MB)");
+
+    val maxBytes: Long
+        get() = if (mb <= 0) Long.MAX_VALUE else mb.toLong() * 1024L * 1024L
+
+    val shortLabel: String
+        get() = when (this) {
+            UNLIMITED -> "Unlimited"
+            MB_100 -> "100 MB"
+            MB_500 -> "500 MB"
+            GB_1 -> "1 GB"
+            GB_2 -> "2 GB"
+            GB_4 -> "4 GB"
+        }
+
+    companion object {
+        fun fromMb(mb: Int): BackupMaxFileSizeOption {
+            if (mb <= 0) return UNLIMITED
+            return entries.firstOrNull { it.mb == mb }
+                ?: entries.filter { it.mb > 0 }.minByOrNull { kotlin.math.abs(it.mb - mb) }
+                ?: UNLIMITED
+        }
+    }
+}
+
 data class UserPreferencesState(
     val themeMode: ThemeMode = ThemeMode.DARK,
     val dynamicColor: Boolean = false,
@@ -57,14 +88,19 @@ data class UserPreferencesState(
     val sortDirection: SortDirection = SortDirection.DESC,
     val showHidden: Boolean = false,
     val autoBackupEnabled: Boolean = false,
+    val quickMediaBackupEnabled: Boolean = false,
     val backupUri: String? = null,
     val backupAccountId: String? = null,
     val backupWifiOnly: Boolean = true,
     val backupChargingOnly: Boolean = false,
     val backupIntervalHours: Int = 6,
-    val backupMaxFileSizeMb: Int = 50,
+    val backupMaxFileSizeMb: Int = 0,
     val deleteAfterUpload: Boolean = false,
-    val backupFolders: Set<String> = setOf("Pictures", "Downloads", "Documents", "DCIM"),
+    val lastBackupAt: Long = 0L,
+    val lastBackupSummary: String = "",
+    val lastBackupQueuedCount: Int = 0,
+    val lastBackupSkippedSummary: String = "",
+    val lastBackupFailedCount: Int = 0,
     val maxCacheSizeMb: Int = 256,
     val downloadDirectory: String = "INTERNAL",
     val autoCleanCache: Boolean = false,
@@ -74,22 +110,15 @@ data class UserPreferencesState(
     val streamBeforeDownload: Boolean = true,
     val backgroundPlayback: Boolean = true,
     val autoPlayVideo: Boolean = false,
-    val audioCrossfadeSeconds: Int = 2,
     val notificationsEnabled: Boolean = true,
     val backupNotifications: Boolean = true,
     val failureNotifications: Boolean = true,
     val progressAlerts: Boolean = true,
     val completedAlerts: Boolean = true,
-    val soundEnabled: Boolean = true,
-    val vibrationEnabled: Boolean = true,
-    val transferConcurrency: Int = 3,
     val transferRetryCount: Int = 3,
     val allowMeteredTransfers: Boolean = false,
     val allowRoaming: Boolean = false,
     val debugLogging: Boolean = false,
-    val updateCheckEnabled: Boolean = true,
-    val lastUpdateCheckAt: Long = 0L,
-    val language: String = "SYSTEM",
     val lastActiveAccountId: String? = null,
     val homeStorageAccountId: String? = null,
     val showNavText: Boolean = true,
@@ -102,9 +131,14 @@ data class UserPreferencesState(
 
     val isOfflineEncryptionEnabled: Boolean
         get() = encryptOfflineFiles || fullPrivacyMode
+
+    val backupMaxFileSizeBytes: Long
+        get() = if (backupMaxFileSizeMb <= 0) Long.MAX_VALUE else backupMaxFileSizeMb.toLong() * 1024L * 1024L
 }
 
 object UserPreferences {
+    val BACKUP_INTERVAL_OPTIONS_HOURS = listOf(1, 2, 4, 6, 12, 24, 48)
+
     private val KEY_MIGRATED = booleanPreferencesKey("migrated_v1")
     private val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
     private val KEY_DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
@@ -117,6 +151,7 @@ object UserPreferences {
     private val KEY_SORT_DIRECTION = stringPreferencesKey("sort_direction")
     private val KEY_SHOW_HIDDEN = booleanPreferencesKey("show_hidden")
     private val KEY_AUTO_BACKUP_ENABLED = booleanPreferencesKey("auto_backup_enabled")
+    private val KEY_QUICK_MEDIA_BACKUP_ENABLED = booleanPreferencesKey("quick_media_backup_enabled")
     private val KEY_BACKUP_URI = stringPreferencesKey("backup_uri")
     private val KEY_BACKUP_ACCOUNT_ID = stringPreferencesKey("backup_account_id")
     private val KEY_BACKUP_WIFI_ONLY = booleanPreferencesKey("backup_wifi_only")
@@ -124,6 +159,11 @@ object UserPreferences {
     private val KEY_BACKUP_INTERVAL_HOURS = intPreferencesKey("backup_interval_hours")
     private val KEY_BACKUP_MAX_FILE_SIZE_MB = intPreferencesKey("backup_max_file_size_mb")
     private val KEY_DELETE_AFTER_UPLOAD = booleanPreferencesKey("delete_after_upload")
+    private val KEY_LAST_BACKUP_AT = longPreferencesKey("last_backup_at")
+    private val KEY_LAST_BACKUP_SUMMARY = stringPreferencesKey("last_backup_summary")
+    private val KEY_LAST_BACKUP_QUEUED_COUNT = intPreferencesKey("last_backup_queued_count")
+    private val KEY_LAST_BACKUP_SKIPPED_SUMMARY = stringPreferencesKey("last_backup_skipped_summary")
+    private val KEY_LAST_BACKUP_FAILED_COUNT = intPreferencesKey("last_backup_failed_count")
     private val KEY_MAX_CACHE_SIZE_MB = intPreferencesKey("max_cache_size_mb")
     private val KEY_DOWNLOAD_DIRECTORY = stringPreferencesKey("download_directory")
     private val KEY_AUTO_CLEAN_CACHE = booleanPreferencesKey("auto_clean_cache")
@@ -133,22 +173,15 @@ object UserPreferences {
     private val KEY_STREAM_BEFORE_DOWNLOAD = booleanPreferencesKey("stream_before_download")
     private val KEY_BACKGROUND_PLAYBACK = booleanPreferencesKey("background_playback")
     private val KEY_AUTO_PLAY_VIDEO = booleanPreferencesKey("auto_play_video")
-    private val KEY_AUDIO_CROSSFADE_SECONDS = intPreferencesKey("audio_crossfade_seconds")
     private val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
     private val KEY_BACKUP_NOTIFICATIONS = booleanPreferencesKey("backup_notifications")
     private val KEY_FAILURE_NOTIFICATIONS = booleanPreferencesKey("failure_notifications")
     private val KEY_PROGRESS_ALERTS = booleanPreferencesKey("progress_alerts")
     private val KEY_COMPLETED_ALERTS = booleanPreferencesKey("completed_alerts")
-    private val KEY_SOUND_ENABLED = booleanPreferencesKey("sound_enabled")
-    private val KEY_VIBRATION_ENABLED = booleanPreferencesKey("vibration_enabled")
-    private val KEY_TRANSFER_CONCURRENCY = intPreferencesKey("transfer_concurrency")
     private val KEY_TRANSFER_RETRY_COUNT = intPreferencesKey("transfer_retry_count")
     private val KEY_ALLOW_METERED_TRANSFERS = booleanPreferencesKey("allow_metered_transfers")
     private val KEY_ALLOW_ROAMING = booleanPreferencesKey("allow_roaming")
     private val KEY_DEBUG_LOGGING = booleanPreferencesKey("debug_logging")
-    private val KEY_UPDATE_CHECK_ENABLED = booleanPreferencesKey("update_check_enabled")
-    private val KEY_LAST_UPDATE_CHECK_AT = longPreferencesKey("last_update_check_at")
-    private val KEY_LANGUAGE = stringPreferencesKey("language")
     private val KEY_LAST_ACTIVE_ACCOUNT_ID = stringPreferencesKey("last_active_account_id")
     private val KEY_HOME_STORAGE_ACCOUNT_ID = stringPreferencesKey("home_storage_account_id")
     private val KEY_SHOW_NAV_TEXT = booleanPreferencesKey("show_nav_text")
@@ -176,25 +209,31 @@ object UserPreferences {
         context.userPreferencesDataStore.edit { prefs ->
             if (prefs[KEY_MIGRATED] == true) return@edit
 
-            if (uiSharedPrefs.contains("is_grid_view")) {
+            if (uiSharedPrefs.contains("is_grid_view") && prefs[KEY_VIEW_MODE] == null) {
                 val isGrid = uiSharedPrefs.getBoolean("is_grid_view", true)
                 prefs[KEY_VIEW_MODE] = if (isGrid) ViewMode.GRID.name else ViewMode.LIST.name
             }
 
             val lastAccId = driveSharedPrefs.getString("last_active_account_id", null)
-            if (!lastAccId.isNullOrBlank()) {
+            if (!lastAccId.isNullOrBlank() && prefs[KEY_LAST_ACTIVE_ACCOUNT_ID] == null) {
                 prefs[KEY_LAST_ACTIVE_ACCOUNT_ID] = lastAccId
             }
 
             if (legacySyncPrefs != null) {
-                legacySyncPrefs[LEGACY_AUTO_BACKUP_ENABLED]?.let {
-                    prefs[KEY_AUTO_BACKUP_ENABLED] = it
+                if (prefs[KEY_AUTO_BACKUP_ENABLED] == null) {
+                    legacySyncPrefs[LEGACY_AUTO_BACKUP_ENABLED]?.let {
+                        prefs[KEY_AUTO_BACKUP_ENABLED] = it
+                    }
                 }
-                legacySyncPrefs[LEGACY_BACKUP_URI]?.let {
-                    prefs[KEY_BACKUP_URI] = it
+                if (prefs[KEY_BACKUP_URI] == null) {
+                    legacySyncPrefs[LEGACY_BACKUP_URI]?.let {
+                        prefs[KEY_BACKUP_URI] = it
+                    }
                 }
-                legacySyncPrefs[LEGACY_BACKUP_ACCOUNT_ID]?.let {
-                    prefs[KEY_BACKUP_ACCOUNT_ID] = it
+                if (prefs[KEY_BACKUP_ACCOUNT_ID] == null) {
+                    legacySyncPrefs[LEGACY_BACKUP_ACCOUNT_ID]?.let {
+                        prefs[KEY_BACKUP_ACCOUNT_ID] = it
+                    }
                 }
             }
 
@@ -204,6 +243,11 @@ object UserPreferences {
 
     fun observe(context: Context): Flow<UserPreferencesState> {
         return context.userPreferencesDataStore.data.map { prefs ->
+            val rawInterval = prefs[KEY_BACKUP_INTERVAL_HOURS] ?: 6
+            val normalizedInterval = BACKUP_INTERVAL_OPTIONS_HOURS.minByOrNull {
+                kotlin.math.abs(it - rawInterval)
+            } ?: 6
+
             UserPreferencesState(
                 themeMode = prefs[KEY_THEME_MODE]?.let {
                     runCatching { ThemeMode.valueOf(it) }.getOrNull()
@@ -226,14 +270,20 @@ object UserPreferences {
                 } ?: SortDirection.DESC,
                 showHidden = prefs[KEY_SHOW_HIDDEN] ?: false,
                 autoBackupEnabled = prefs[KEY_AUTO_BACKUP_ENABLED] ?: false,
+                quickMediaBackupEnabled = prefs[KEY_QUICK_MEDIA_BACKUP_ENABLED] ?: false,
                 backupUri = prefs[KEY_BACKUP_URI],
                 backupAccountId = prefs[KEY_BACKUP_ACCOUNT_ID],
                 backupWifiOnly = prefs[KEY_BACKUP_WIFI_ONLY] ?: true,
                 backupChargingOnly = prefs[KEY_BACKUP_CHARGING_ONLY] ?: false,
-                backupIntervalHours = (prefs[KEY_BACKUP_INTERVAL_HOURS] ?: 6).coerceAtLeast(1),
-                backupMaxFileSizeMb = (prefs[KEY_BACKUP_MAX_FILE_SIZE_MB] ?: 50).coerceIn(1, 100),
+                backupIntervalHours = normalizedInterval,
+                backupMaxFileSizeMb = (prefs[KEY_BACKUP_MAX_FILE_SIZE_MB] ?: 0).coerceAtLeast(0),
                 deleteAfterUpload = prefs[KEY_DELETE_AFTER_UPLOAD] ?: false,
-                maxCacheSizeMb = (prefs[KEY_MAX_CACHE_SIZE_MB] ?: 256).coerceAtLeast(32),
+                lastBackupAt = prefs[KEY_LAST_BACKUP_AT] ?: 0L,
+                lastBackupSummary = prefs[KEY_LAST_BACKUP_SUMMARY] ?: "",
+                lastBackupQueuedCount = prefs[KEY_LAST_BACKUP_QUEUED_COUNT] ?: 0,
+                lastBackupSkippedSummary = prefs[KEY_LAST_BACKUP_SKIPPED_SUMMARY] ?: "",
+                lastBackupFailedCount = prefs[KEY_LAST_BACKUP_FAILED_COUNT] ?: 0,
+                maxCacheSizeMb = (prefs[KEY_MAX_CACHE_SIZE_MB] ?: 256).coerceIn(32, 4096),
                 downloadDirectory = prefs[KEY_DOWNLOAD_DIRECTORY] ?: "INTERNAL",
                 autoCleanCache = prefs[KEY_AUTO_CLEAN_CACHE] ?: false,
                 appLockEnabled = prefs[KEY_APP_LOCK_ENABLED] ?: false,
@@ -242,22 +292,15 @@ object UserPreferences {
                 streamBeforeDownload = prefs[KEY_STREAM_BEFORE_DOWNLOAD] ?: true,
                 backgroundPlayback = prefs[KEY_BACKGROUND_PLAYBACK] ?: true,
                 autoPlayVideo = prefs[KEY_AUTO_PLAY_VIDEO] ?: false,
-                audioCrossfadeSeconds = (prefs[KEY_AUDIO_CROSSFADE_SECONDS] ?: 2).coerceIn(0, 10),
                 notificationsEnabled = prefs[KEY_NOTIFICATIONS_ENABLED] ?: true,
                 backupNotifications = prefs[KEY_BACKUP_NOTIFICATIONS] ?: true,
                 failureNotifications = prefs[KEY_FAILURE_NOTIFICATIONS] ?: true,
                 progressAlerts = prefs[KEY_PROGRESS_ALERTS] ?: true,
                 completedAlerts = prefs[KEY_COMPLETED_ALERTS] ?: true,
-                soundEnabled = prefs[KEY_SOUND_ENABLED] ?: true,
-                vibrationEnabled = prefs[KEY_VIBRATION_ENABLED] ?: true,
-                transferConcurrency = (prefs[KEY_TRANSFER_CONCURRENCY] ?: 3).coerceIn(1, 5),
-                transferRetryCount = (prefs[KEY_TRANSFER_RETRY_COUNT] ?: 3).coerceIn(1, 10),
+                transferRetryCount = (prefs[KEY_TRANSFER_RETRY_COUNT] ?: 3).coerceIn(0, 10),
                 allowMeteredTransfers = prefs[KEY_ALLOW_METERED_TRANSFERS] ?: false,
                 allowRoaming = prefs[KEY_ALLOW_ROAMING] ?: false,
                 debugLogging = prefs[KEY_DEBUG_LOGGING] ?: false,
-                updateCheckEnabled = prefs[KEY_UPDATE_CHECK_ENABLED] ?: true,
-                lastUpdateCheckAt = prefs[KEY_LAST_UPDATE_CHECK_AT] ?: 0L,
-                language = prefs[KEY_LANGUAGE] ?: "SYSTEM",
                 lastActiveAccountId = prefs[KEY_LAST_ACTIVE_ACCOUNT_ID],
                 homeStorageAccountId = prefs[KEY_HOME_STORAGE_ACCOUNT_ID],
                 showNavText = prefs[KEY_SHOW_NAV_TEXT] ?: true,
@@ -346,6 +389,10 @@ object UserPreferences {
         context.userPreferencesDataStore.edit { it[KEY_AUTO_BACKUP_ENABLED] = enabled }
     }
 
+    suspend fun setQuickMediaBackupEnabled(context: Context, enabled: Boolean) {
+        context.userPreferencesDataStore.edit { it[KEY_QUICK_MEDIA_BACKUP_ENABLED] = enabled }
+    }
+
     suspend fun setBackupUri(context: Context, uri: String?) {
         context.userPreferencesDataStore.edit {
             if (uri == null) it.remove(KEY_BACKUP_URI)
@@ -369,23 +416,43 @@ object UserPreferences {
     }
 
     suspend fun setBackupIntervalHours(context: Context, hours: Int) {
-        context.userPreferencesDataStore.edit { it[KEY_BACKUP_INTERVAL_HOURS] = hours.coerceAtLeast(1) }
+        val snapped = BACKUP_INTERVAL_OPTIONS_HOURS.minByOrNull { kotlin.math.abs(it - hours) } ?: 6
+        context.userPreferencesDataStore.edit { it[KEY_BACKUP_INTERVAL_HOURS] = snapped }
     }
 
     suspend fun setBackupMaxFileSizeMb(context: Context, sizeMb: Int) {
-        context.userPreferencesDataStore.edit { it[KEY_BACKUP_MAX_FILE_SIZE_MB] = sizeMb.coerceIn(1, 100) }
+        val normalized = if (sizeMb <= 0) 0 else sizeMb
+        context.userPreferencesDataStore.edit { it[KEY_BACKUP_MAX_FILE_SIZE_MB] = normalized }
     }
 
     suspend fun setDeleteAfterUpload(context: Context, delete: Boolean) {
         context.userPreferencesDataStore.edit { it[KEY_DELETE_AFTER_UPLOAD] = delete }
     }
 
+    suspend fun recordBackupRunStatus(
+        context: Context,
+        timestamp: Long,
+        summary: String,
+        queuedCount: Int,
+        skippedSummary: String,
+        failedCount: Int
+    ) {
+        context.userPreferencesDataStore.edit { prefs ->
+            prefs[KEY_LAST_BACKUP_AT] = timestamp
+            prefs[KEY_LAST_BACKUP_SUMMARY] = summary
+            prefs[KEY_LAST_BACKUP_QUEUED_COUNT] = queuedCount
+            prefs[KEY_LAST_BACKUP_SKIPPED_SUMMARY] = skippedSummary
+            prefs[KEY_LAST_BACKUP_FAILED_COUNT] = failedCount
+        }
+    }
+
     suspend fun setMaxCacheSizeMb(context: Context, sizeMb: Int) {
-        context.userPreferencesDataStore.edit { it[KEY_MAX_CACHE_SIZE_MB] = sizeMb.coerceAtLeast(32) }
+        context.userPreferencesDataStore.edit { it[KEY_MAX_CACHE_SIZE_MB] = sizeMb.coerceIn(32, 4096) }
     }
 
     suspend fun setDownloadDirectory(context: Context, dir: String) {
-        context.userPreferencesDataStore.edit { it[KEY_DOWNLOAD_DIRECTORY] = dir }
+        val normalized = if (dir.equals("EXTERNAL", ignoreCase = true)) "EXTERNAL" else "INTERNAL"
+        context.userPreferencesDataStore.edit { it[KEY_DOWNLOAD_DIRECTORY] = normalized }
     }
 
     suspend fun setAutoCleanCache(context: Context, enable: Boolean) {
@@ -416,10 +483,6 @@ object UserPreferences {
         context.userPreferencesDataStore.edit { it[KEY_AUTO_PLAY_VIDEO] = enabled }
     }
 
-    suspend fun setAudioCrossfadeSeconds(context: Context, seconds: Int) {
-        context.userPreferencesDataStore.edit { it[KEY_AUDIO_CROSSFADE_SECONDS] = seconds.coerceIn(0, 10) }
-    }
-
     suspend fun setNotificationsEnabled(context: Context, enabled: Boolean) {
         context.userPreferencesDataStore.edit { it[KEY_NOTIFICATIONS_ENABLED] = enabled }
     }
@@ -440,20 +503,8 @@ object UserPreferences {
         context.userPreferencesDataStore.edit { it[KEY_COMPLETED_ALERTS] = enabled }
     }
 
-    suspend fun setSoundEnabled(context: Context, enabled: Boolean) {
-        context.userPreferencesDataStore.edit { it[KEY_SOUND_ENABLED] = enabled }
-    }
-
-    suspend fun setVibrationEnabled(context: Context, enabled: Boolean) {
-        context.userPreferencesDataStore.edit { it[KEY_VIBRATION_ENABLED] = enabled }
-    }
-
-    suspend fun setTransferConcurrency(context: Context, count: Int) {
-        context.userPreferencesDataStore.edit { it[KEY_TRANSFER_CONCURRENCY] = count.coerceIn(1, 5) }
-    }
-
     suspend fun setTransferRetryCount(context: Context, count: Int) {
-        context.userPreferencesDataStore.edit { it[KEY_TRANSFER_RETRY_COUNT] = count.coerceIn(1, 10) }
+        context.userPreferencesDataStore.edit { it[KEY_TRANSFER_RETRY_COUNT] = count.coerceIn(0, 10) }
     }
 
     suspend fun setAllowMeteredTransfers(context: Context, allow: Boolean) {
@@ -466,18 +517,6 @@ object UserPreferences {
 
     suspend fun setDebugLogging(context: Context, enabled: Boolean) {
         context.userPreferencesDataStore.edit { it[KEY_DEBUG_LOGGING] = enabled }
-    }
-
-    suspend fun setUpdateCheckEnabled(context: Context, enabled: Boolean) {
-        context.userPreferencesDataStore.edit { it[KEY_UPDATE_CHECK_ENABLED] = enabled }
-    }
-
-    suspend fun setLastUpdateCheckAt(context: Context, timestamp: Long) {
-        context.userPreferencesDataStore.edit { it[KEY_LAST_UPDATE_CHECK_AT] = timestamp }
-    }
-
-    suspend fun setLanguage(context: Context, lang: String) {
-        context.userPreferencesDataStore.edit { it[KEY_LANGUAGE] = lang }
     }
 
     suspend fun setLastActiveAccountId(context: Context, accountId: String?) {
@@ -497,6 +536,10 @@ object UserPreferences {
     }
 
     suspend fun resetAllSettings(context: Context) {
-        context.userPreferencesDataStore.edit { it.clear() }
+        context.userPreferencesDataStore.edit {
+            it.clear()
+            it[KEY_MIGRATED] = true
+        }
+        runCatching { context.dataStore.edit { it.clear() } }
     }
 }

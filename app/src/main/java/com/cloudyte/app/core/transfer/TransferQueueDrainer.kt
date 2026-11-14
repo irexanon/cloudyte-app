@@ -52,7 +52,9 @@ class RoomTransferQueueDrainer(
     private val leaseDurationMs: Long = 2 * 60 * 1000L,
     private val maxTransfersPerDrain: Int = 3,
     private val networkGate: TransferNetworkGate? = null,
-    private val diagnostics: TransferDiagnostics? = null
+    private val diagnostics: TransferDiagnostics? = null,
+    private val maxRetryCount: suspend () -> Int = { Int.MAX_VALUE },
+    private val onTerminalOutcome: (suspend (LocalTransfer, TransferOutcome) -> Unit)? = null
 ) : TransferQueueDrainer {
     override suspend fun drain(
         trigger: DrainTrigger,
@@ -176,7 +178,11 @@ class RoomTransferQueueDrainer(
                     applyOutcome(transfer, leaseOwner, interrupted)
                 } else {
                     runCatching {
-                        transition(transfer, leaseOwner, TransferState.RUNNING, TransferState.FAILED_RETRYABLE, "FAILED", "UNEXPECTED", error.message ?: "Transfer failed", now() + 30_000L)
+                        applyOutcome(
+                            transfer,
+                            leaseOwner,
+                            TransferOutcome.Retryable("UNEXPECTED", error.message ?: "Transfer failed", now() + 30_000L)
+                        )
                     }
                 }
                 processed++
@@ -210,15 +216,53 @@ class RoomTransferQueueDrainer(
         leaseOwner: String,
         outcome: TransferOutcome
     ) {
+        var effectiveOutcome = outcome
         when (outcome) {
             TransferOutcome.Completed -> {
                 transition(transfer, leaseOwner, TransferState.RUNNING, TransferState.COMPLETED, "COMPLETED")
                 runCatching { executor.onCompleted(transfer) }
+                runCatching { onTerminalOutcome?.invoke(transfer, outcome) }
             }
-            is TransferOutcome.Retryable -> transition(transfer, leaseOwner, TransferState.RUNNING, TransferState.FAILED_RETRYABLE, "FAILED", outcome.code, outcome.message, outcome.retryAt ?: retryAt(transfer.attemptCount), outcome.httpStatus)
-            is TransferOutcome.Permanent -> transition(transfer, leaseOwner, TransferState.RUNNING, TransferState.FAILED_PERMANENT, "FAILED", outcome.code, outcome.message, httpStatus = outcome.httpStatus)
+            is TransferOutcome.Retryable -> {
+                val retryLimit = runCatching { maxRetryCount() }.getOrDefault(Int.MAX_VALUE).coerceAtLeast(0)
+                if (transfer.attemptCount > retryLimit) {
+                    val permanentMessage = "Retry limit ($retryLimit) exceeded: ${outcome.message}"
+                    val permanent = TransferOutcome.Permanent("RETRY_LIMIT_EXCEEDED", permanentMessage, outcome.httpStatus)
+                    effectiveOutcome = permanent
+                    transition(
+                        transfer,
+                        leaseOwner,
+                        TransferState.RUNNING,
+                        TransferState.FAILED_PERMANENT,
+                        "FAILED",
+                        permanent.code,
+                        permanent.message,
+                        httpStatus = permanent.httpStatus
+                    )
+                    runCatching { onTerminalOutcome?.invoke(transfer, permanent) }
+                } else {
+                    transition(
+                        transfer,
+                        leaseOwner,
+                        TransferState.RUNNING,
+                        TransferState.FAILED_RETRYABLE,
+                        "FAILED",
+                        outcome.code,
+                        outcome.message,
+                        outcome.retryAt ?: retryAt(transfer.attemptCount),
+                        outcome.httpStatus
+                    )
+                }
+            }
+            is TransferOutcome.Permanent -> {
+                transition(transfer, leaseOwner, TransferState.RUNNING, TransferState.FAILED_PERMANENT, "FAILED", outcome.code, outcome.message, httpStatus = outcome.httpStatus)
+                runCatching { onTerminalOutcome?.invoke(transfer, outcome) }
+            }
             is TransferOutcome.WaitingForNetwork -> transition(transfer, leaseOwner, TransferState.RUNNING, TransferState.WAITING_FOR_NETWORK, "PENDING", outcome.code, outcome.message)
-            is TransferOutcome.WaitingForAuth -> transition(transfer, leaseOwner, TransferState.RUNNING, TransferState.WAITING_FOR_AUTH, "PENDING", outcome.code, outcome.message)
+            is TransferOutcome.WaitingForAuth -> {
+                transition(transfer, leaseOwner, TransferState.RUNNING, TransferState.WAITING_FOR_AUTH, "PENDING", outcome.code, outcome.message)
+                runCatching { onTerminalOutcome?.invoke(transfer, outcome) }
+            }
             TransferOutcome.Paused -> transitionPausedDeterministic(transfer, leaseOwner)
             TransferOutcome.Cancelled -> {
                 val latest = queueDao.currentRow(transfer.id) ?: transfer
@@ -231,10 +275,10 @@ class RoomTransferQueueDrainer(
             transferId = transfer.id,
             accountId = transfer.accountId,
             providerType = transfer.providerType,
-            state = outcome.diagnosticState(),
+            state = effectiveOutcome.diagnosticState(),
             retryCount = transfer.attemptCount,
-            errorCode = outcome.diagnosticCode(),
-            httpStatus = outcome.diagnosticHttpStatus(),
+            errorCode = effectiveOutcome.diagnosticCode(),
+            httpStatus = effectiveOutcome.diagnosticHttpStatus(),
             checkpointAt = now(),
             workerRunId = leaseOwner
         )

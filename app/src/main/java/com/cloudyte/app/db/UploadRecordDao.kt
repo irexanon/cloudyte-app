@@ -11,6 +11,21 @@ interface UploadRecordDao {
     @Query("SELECT * FROM upload_records WHERE fileName = :fileName AND targetAccountId = :accountId AND targetFolderId = :folderId ORDER BY uploadedAt DESC LIMIT 1")
     suspend fun getRecord(fileName: String, accountId: String, folderId: String): LocalUploadRecord?
 
+    @Query("SELECT * FROM upload_records WHERE localUri = :localUri AND targetAccountId = :accountId AND targetFolderId = :folderId AND status = 'SUCCESS' ORDER BY uploadedAt DESC LIMIT 1")
+    suspend fun findLatestSuccessByUri(
+        localUri: String,
+        accountId: String,
+        folderId: String
+    ): LocalUploadRecord?
+
+    @Query("SELECT * FROM upload_records WHERE contentHash = :contentHash AND fileSize = :fileSize AND targetAccountId = :accountId AND targetFolderId = :folderId AND status = 'SUCCESS' ORDER BY uploadedAt DESC LIMIT 1")
+    suspend fun findLatestSuccessByHash(
+        contentHash: String,
+        fileSize: Long,
+        accountId: String,
+        folderId: String
+    ): LocalUploadRecord?
+
     @Query("SELECT * FROM upload_records WHERE fileName = :fileName AND fileSize = :fileSize AND targetAccountId = :accountId AND status = 'SUCCESS' LIMIT 1")
     suspend fun findMatchingSuccessRecord(fileName: String, fileSize: Long, accountId: String): LocalUploadRecord?
 

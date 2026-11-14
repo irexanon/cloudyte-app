@@ -1,5 +1,6 @@
 package com.cloudyte.app.ui.screens
 
+import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.core.*
@@ -7,7 +8,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -18,23 +18,36 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
 import androidx.navigation.NavController
 import com.cloudyte.app.api.ApiClient
 import com.cloudyte.app.api.FileRepository
 import com.cloudyte.app.api.OfflineFileManager
+import com.cloudyte.app.data.UserPreferences
+import com.cloudyte.app.data.UserPreferencesState
+import com.cloudyte.app.features.player.AudioPlaybackService
 import com.cloudyte.app.ui.theme.*
+import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, UnstableApi::class)
@@ -45,6 +58,7 @@ fun AudioPlayerScreen(
     fileId: String
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val file = remember(fileId) { FileRepository.getFile(fileId) }
     val fileName = file?.effectiveName ?: "Audio Track"
 
@@ -61,67 +75,157 @@ fun AudioPlayerScreen(
         ApiClient.getFileUrl(acc, fileId, preview = true)
     }
 
-    var isPlaying by remember { mutableStateOf(true) }
-    var currentPosition by remember { mutableLongStateOf(0L) }
-    var duration by remember { mutableLongStateOf(0L) }
-    var isBuffering by remember { mutableStateOf(true) }
-    var isLooping by remember { mutableStateOf(false) }
-    var playbackSpeed by remember { mutableFloatStateOf(1f) }
-    var showSpeedDialog by remember { mutableStateOf(false) }
-
-    // Auto-cache audio for offline listening in background
-    LaunchedEffect(fileId, file, effectiveAccId) {
-        val acc = effectiveAccId.ifBlank { accountId }
-        if (acc.isNotBlank() && acc != "all" && acc != "root" && file?.isEncrypted != true) {
-            file?.let {
-                OfflineFileManager.autoCacheOnView(context, acc, it)
-            }
+    val prefsState by UserPreferences.observe(context).collectAsState(initial = UserPreferencesState())
+    val initialPrefs = remember {
+        kotlinx.coroutines.runBlocking {
+            runCatching { UserPreferences.observe(context).first() }.getOrDefault(UserPreferencesState())
         }
     }
 
-    val exoPlayer = remember {
+    var activePlayer by remember { mutableStateOf<Player?>(null) }
+    var isLocalFallbackPlayer by remember { mutableStateOf(false) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var currentPosition by remember { mutableLongStateOf(0L) }
+    var duration by remember { mutableLongStateOf(0L) }
+    var isBuffering by remember { mutableStateOf(true) }
+    var statusNote by remember { mutableStateOf<String?>(null) }
+    var isLooping by remember { mutableStateOf(false) }
+    var playbackSpeed by remember { mutableFloatStateOf(1f) }
+    var showSpeedDialog by remember { mutableStateOf(false) }
+    var attemptedDownloadFallback by remember(fileId) { mutableStateOf(false) }
+
+    fun createLocalPlayer(): ExoPlayer {
         val token = ApiClient.getToken()
         val headers = mutableMapOf<String, String>()
         if (!token.isNullOrEmpty()) {
             headers["Authorization"] = "Bearer $token"
         }
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
+        val httpFactory = DefaultHttpDataSource.Factory()
             .setDefaultRequestProperties(headers)
             .setAllowCrossProtocolRedirects(true)
+        val dataSourceFactory = DefaultDataSource.Factory(context, httpFactory)
 
-        ExoPlayer.Builder(context)
+        return ExoPlayer.Builder(context)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
             .build()
     }
 
-    LaunchedEffect(fileId, effectiveAccId, file?.isEncrypted) {
-        val acc = effectiveAccId.ifBlank { accountId }
-        val mediaItem = if (file?.isEncrypted == true) {
-            val decrypted = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                OfflineFileManager.prepareDecryptedFileForViewer(context, acc, file).getOrNull()
+    // Bind MediaController to AudioPlaybackService when backgroundPlayback is enabled;
+    // otherwise use a screen-scoped ExoPlayer released on dispose.
+    DisposableEffect(initialPrefs.backgroundPlayback) {
+        var controllerFuture: ListenableFuture<MediaController>? = null
+        var boundPlayer: Player? = null
+
+        if (initialPrefs.backgroundPlayback) {
+            try {
+                val token = SessionToken(context, ComponentName(context, AudioPlaybackService::class.java))
+                val future = MediaController.Builder(context, token).buildAsync()
+                controllerFuture = future
+                future.addListener({
+                    try {
+                        val controller = future.get()
+                        boundPlayer = controller
+                        activePlayer = controller
+                        isLocalFallbackPlayer = false
+                    } catch (_: Exception) {
+                        val fallback = createLocalPlayer()
+                        boundPlayer = fallback
+                        activePlayer = fallback
+                        isLocalFallbackPlayer = true
+                    }
+                }, ContextCompat.getMainExecutor(context))
+            } catch (_: Exception) {
+                val fallback = createLocalPlayer()
+                boundPlayer = fallback
+                activePlayer = fallback
+                isLocalFallbackPlayer = true
             }
-            if (decrypted != null && decrypted.exists() && decrypted.length() > 0) {
-                MediaItem.fromUri(Uri.fromFile(decrypted))
-            } else null
         } else {
-            val offlineFile = OfflineFileManager.findOfflineFile(context, acc, fileId)
-            if (offlineFile != null && offlineFile.exists() && offlineFile.length() > 0) {
-                val prepared = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    if (file != null) OfflineFileManager.prepareDecryptedFileForViewer(context, acc, file).getOrNull() else offlineFile
-                } ?: offlineFile
-                MediaItem.fromUri(Uri.fromFile(prepared))
-            } else {
-                MediaItem.fromUri(audioUrl)
-            }
+            val local = createLocalPlayer()
+            boundPlayer = local
+            activePlayer = local
+            isLocalFallbackPlayer = true
         }
-        if (mediaItem != null) {
-            exoPlayer.setMediaItem(mediaItem)
-            exoPlayer.prepare()
-            exoPlayer.playWhenReady = true
+
+        onDispose {
+            val currentControllerFuture = controllerFuture
+            val currentPlayer = boundPlayer
+            if (currentControllerFuture != null && !isLocalFallbackPlayer) {
+                if (!prefsState.backgroundPlayback) {
+                    currentPlayer?.stop()
+                    context.stopService(Intent(context, AudioPlaybackService::class.java))
+                }
+                MediaController.releaseFuture(currentControllerFuture)
+            } else {
+                currentPlayer?.release()
+            }
+            activePlayer = null
         }
     }
 
-    DisposableEffect(exoPlayer) {
+    // Load media item honoring streamBeforeDownload and offline/encryption requirements
+    LaunchedEffect(activePlayer, fileId, effectiveAccId, file?.isEncrypted, initialPrefs.streamBeforeDownload) {
+        val player = activePlayer ?: return@LaunchedEffect
+        val acc = effectiveAccId.ifBlank { accountId }
+        val metadata = MediaMetadata.Builder()
+            .setTitle(fileName)
+            .setArtist("Cloudyte")
+            .build()
+
+        val mediaUri: Uri? = if (file?.isEncrypted == true) {
+            isBuffering = true
+            statusNote = "Decrypting encrypted audio…"
+            val decrypted = withContext(Dispatchers.IO) {
+                OfflineFileManager.prepareDecryptedFileForViewer(context, acc, file).getOrNull()
+            }
+            statusNote = null
+            decrypted?.takeIf { it.exists() && it.length() > 0 }?.let { Uri.fromFile(it) }
+        } else {
+            val existingOffline = withContext(Dispatchers.IO) {
+                OfflineFileManager.findOfflineFile(context, acc, fileId)
+            }
+            if (existingOffline != null && existingOffline.exists() && existingOffline.length() > 0) {
+                statusNote = "Playing from offline storage"
+                Uri.fromFile(existingOffline)
+            } else if (!initialPrefs.streamBeforeDownload && file != null && acc.isNotBlank()) {
+                isBuffering = true
+                statusNote = "Downloading before playback…"
+                val downloaded = withContext(Dispatchers.IO) {
+                    OfflineFileManager.downloadFile(context, acc, file).getOrNull()
+                }
+                if (downloaded != null && downloaded.exists() && downloaded.length() > 0) {
+                    statusNote = "Downloaded locally"
+                    Uri.fromFile(downloaded)
+                } else {
+                    statusNote = "Local download failed; streaming instead"
+                    Uri.parse(audioUrl)
+                }
+            } else {
+                statusNote = null
+                if (acc.isNotBlank() && acc != "all" && acc != "root" && file != null) {
+                    OfflineFileManager.autoCacheOnView(context, acc, file)
+                }
+                Uri.parse(audioUrl)
+            }
+        }
+
+        if (mediaUri != null) {
+            val item = MediaItem.Builder()
+                .setMediaId(fileId)
+                .setUri(mediaUri)
+                .setMediaMetadata(metadata)
+                .build()
+            player.setMediaItem(item)
+            player.prepare()
+            player.playWhenReady = true
+        } else {
+            isBuffering = false
+            statusNote = "Unable to prepare audio file"
+        }
+    }
+
+    DisposableEffect(activePlayer) {
+        val player = activePlayer ?: return@DisposableEffect onDispose {}
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
@@ -130,28 +234,57 @@ fun AudioPlayerScreen(
             override fun onPlaybackStateChanged(state: Int) {
                 isBuffering = (state == Player.STATE_BUFFERING)
                 if (state == Player.STATE_READY) {
-                    duration = exoPlayer.duration.coerceAtLeast(0L)
+                    duration = player.duration.coerceAtLeast(0L)
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                if (!attemptedDownloadFallback && file != null && !file.isEncrypted) {
+                    attemptedDownloadFallback = true
+                    val acc = effectiveAccId.ifBlank { accountId }
+                    if (acc.isNotBlank()) {
+                        scope.launch {
+                            statusNote = "Stream failed; downloading locally…"
+                            val downloaded = withContext(Dispatchers.IO) {
+                                OfflineFileManager.downloadFile(context, acc, file).getOrNull()
+                            }
+                            if (downloaded != null && downloaded.exists() && downloaded.length() > 0) {
+                                statusNote = "Playing local copy"
+                                player.setMediaItem(MediaItem.fromUri(Uri.fromFile(downloaded)))
+                                player.prepare()
+                                player.playWhenReady = true
+                            } else {
+                                isBuffering = false
+                                statusNote = error.localizedMessage ?: "Audio playback failed"
+                            }
+                        }
+                    }
+                } else {
+                    isBuffering = false
+                    statusNote = error.localizedMessage ?: "Audio playback failed"
                 }
             }
         }
-        exoPlayer.addListener(listener)
+        player.addListener(listener)
+        isPlaying = player.isPlaying
+        duration = player.duration.coerceAtLeast(0L)
+        currentPosition = player.currentPosition.coerceAtLeast(0L)
 
         onDispose {
-            exoPlayer.removeListener(listener)
-            exoPlayer.release()
+            player.removeListener(listener)
         }
     }
 
     // Position tracker
-    LaunchedEffect(isPlaying) {
+    LaunchedEffect(activePlayer, isPlaying) {
+        val player = activePlayer ?: return@LaunchedEffect
         while (isPlaying) {
-            currentPosition = exoPlayer.currentPosition.coerceAtLeast(0L)
-            duration = exoPlayer.duration.coerceAtLeast(0L)
+            currentPosition = player.currentPosition.coerceAtLeast(0L)
+            duration = player.duration.coerceAtLeast(0L)
             delay(500)
         }
     }
 
-    // Disc rotation animation
     val infiniteTransition = rememberInfiniteTransition(label = "disc_spin")
     val rotation by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -178,7 +311,7 @@ fun AudioPlayerScreen(
                                 .heightIn(min = 48.dp)
                                 .clickable {
                                     playbackSpeed = speed
-                                    exoPlayer.setPlaybackSpeed(speed)
+                                    activePlayer?.setPlaybackSpeed(speed)
                                     showSpeedDialog = false
                                 }
                                 .padding(vertical = 8.dp),
@@ -188,7 +321,7 @@ fun AudioPlayerScreen(
                                 selected = playbackSpeed == speed,
                                 onClick = {
                                     playbackSpeed = speed
-                                    exoPlayer.setPlaybackSpeed(speed)
+                                    activePlayer?.setPlaybackSpeed(speed)
                                     showSpeedDialog = false
                                 },
                                 colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
@@ -211,7 +344,23 @@ fun AudioPlayerScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text("Audio Player", color = MaterialTheme.colorScheme.onBackground, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) },
+                title = {
+                    Column {
+                        Text(
+                            "Audio Player",
+                            color = MaterialTheme.colorScheme.onBackground,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (prefsState.backgroundPlayback) {
+                            Text(
+                                "Background playback active",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = MaterialTheme.colorScheme.onBackground)
@@ -256,7 +405,6 @@ fun AudioPlayerScreen(
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Vinyl / Album Graphic
             Box(
                 modifier = Modifier
                     .size(240.dp)
@@ -273,7 +421,6 @@ fun AudioPlayerScreen(
                     .rotate(if (isPlaying) rotation else 0f),
                 contentAlignment = Alignment.Center
             ) {
-                // Vinyl grooves
                 Box(
                     modifier = Modifier
                         .size(210.dp)
@@ -306,7 +453,6 @@ fun AudioPlayerScreen(
                 }
             }
 
-            // Track info
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
@@ -325,9 +471,16 @@ fun AudioPlayerScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MetricLabelTextStyle
                 )
+                if (!statusNote.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = statusNote.orEmpty(),
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
             }
 
-            // Scrubber
             Column(modifier = Modifier.fillMaxWidth()) {
                 var isDragging by remember { mutableStateOf(false) }
                 var dragPosition by remember { mutableFloatStateOf(0f) }
@@ -346,7 +499,7 @@ fun AudioPlayerScreen(
                         isDragging = false
                         if (duration > 0) {
                             val seekTarget = (dragPosition * duration).toLong()
-                            exoPlayer.seekTo(seekTarget)
+                            activePlayer?.seekTo(seekTarget)
                             currentPosition = seekTarget
                         }
                     },
@@ -375,7 +528,6 @@ fun AudioPlayerScreen(
                 }
             }
 
-            // Playback controls
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -384,7 +536,7 @@ fun AudioPlayerScreen(
                 IconButton(
                     onClick = {
                         isLooping = !isLooping
-                        exoPlayer.repeatMode = if (isLooping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
+                        activePlayer?.repeatMode = if (isLooping) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
                     }
                 ) {
                     Icon(
@@ -396,8 +548,9 @@ fun AudioPlayerScreen(
 
                 IconButton(
                     onClick = {
-                        val newPos = (exoPlayer.currentPosition - 10000L).coerceAtLeast(0L)
-                        exoPlayer.seekTo(newPos)
+                        val player = activePlayer ?: return@IconButton
+                        val newPos = (player.currentPosition - 10000L).coerceAtLeast(0L)
+                        player.seekTo(newPos)
                         currentPosition = newPos
                     },
                     modifier = Modifier.size(48.dp)
@@ -407,10 +560,11 @@ fun AudioPlayerScreen(
 
                 IconButton(
                     onClick = {
+                        val player = activePlayer ?: return@IconButton
                         if (isPlaying) {
-                            exoPlayer.pause()
+                            player.pause()
                         } else {
-                            exoPlayer.play()
+                            player.play()
                         }
                     },
                     modifier = Modifier
@@ -434,8 +588,10 @@ fun AudioPlayerScreen(
 
                 IconButton(
                     onClick = {
-                        val newPos = (exoPlayer.currentPosition + 10000L).coerceAtMost(exoPlayer.duration)
-                        exoPlayer.seekTo(newPos)
+                        val player = activePlayer ?: return@IconButton
+                        val maxDur = player.duration.coerceAtLeast(0L)
+                        val newPos = (player.currentPosition + 10000L).let { if (maxDur > 0L) it.coerceAtMost(maxDur) else it }
+                        player.seekTo(newPos)
                         currentPosition = newPos
                     },
                     modifier = Modifier.size(48.dp)

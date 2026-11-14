@@ -1,0 +1,1336 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 15,
+    "identityHash": "454c0f4aa8c152a4127d7c6b7365fa26",
+    "entities": [
+      {
+        "tableName": "cloud_files",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, `size` TEXT NOT NULL, `rawSize` INTEGER NOT NULL, `time` INTEGER NOT NULL, `isFolder` INTEGER NOT NULL, `path` TEXT NOT NULL, `folderId` TEXT NOT NULL, `accountId` TEXT, `mimeType` TEXT, `shareId` TEXT, `isShared` INTEGER NOT NULL, `cachedAt` INTEGER NOT NULL, `updatedAt` INTEGER, `thumbUrl` TEXT, `isEncrypted` INTEGER NOT NULL, `encryptionFormatVersion` INTEGER, `encryptionKeyId` TEXT, `encryptedMetadata` TEXT, `encryptedSizeBytes` INTEGER, `encryptedChecksum` TEXT, `opaqueRemoteName` TEXT, `plaintextSizeBytes` INTEGER, `originalMetadataAvailable` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "size",
+            "columnName": "size",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rawSize",
+            "columnName": "rawSize",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "time",
+            "columnName": "time",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isFolder",
+            "columnName": "isFolder",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "path",
+            "columnName": "path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "folderId",
+            "columnName": "folderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mimeType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "shareId",
+            "columnName": "shareId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isShared",
+            "columnName": "isShared",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cachedAt",
+            "columnName": "cachedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "thumbUrl",
+            "columnName": "thumbUrl",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isEncrypted",
+            "columnName": "isEncrypted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptionFormatVersion",
+            "columnName": "encryptionFormatVersion",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "encryptionKeyId",
+            "columnName": "encryptionKeyId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "encryptedMetadata",
+            "columnName": "encryptedMetadata",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "encryptedSizeBytes",
+            "columnName": "encryptedSizeBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "encryptedChecksum",
+            "columnName": "encryptedChecksum",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "opaqueRemoteName",
+            "columnName": "opaqueRemoteName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "plaintextSizeBytes",
+            "columnName": "plaintextSizeBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "originalMetadataAvailable",
+            "columnName": "originalMetadataAvailable",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cloud_files_accountId_folderId",
+            "unique": false,
+            "columnNames": [
+              "accountId",
+              "folderId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cloud_files_accountId_folderId` ON `${TABLE_NAME}` (`accountId`, `folderId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "local_accounts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `driveName` TEXT, `email` TEXT, `accountType` TEXT NOT NULL, `usageBytes` INTEGER NOT NULL, `totalBytes` INTEGER NOT NULL, `percentage` REAL NOT NULL, `fileCount` INTEGER NOT NULL, `isDefault` INTEGER NOT NULL, `channelId` TEXT, `cachedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "driveName",
+            "columnName": "driveName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "email",
+            "columnName": "email",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "accountType",
+            "columnName": "accountType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "usageBytes",
+            "columnName": "usageBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "totalBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "percentage",
+            "columnName": "percentage",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileCount",
+            "columnName": "fileCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isDefault",
+            "columnName": "isDefault",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channelId",
+            "columnName": "channelId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "cachedAt",
+            "columnName": "cachedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "upload_records",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`recordId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `localUri` TEXT NOT NULL, `fileName` TEXT NOT NULL, `fileSize` INTEGER NOT NULL, `lastModified` INTEGER NOT NULL, `targetAccountId` TEXT NOT NULL, `targetFolderId` TEXT NOT NULL, `cloudFileId` TEXT, `uploadedAt` INTEGER NOT NULL, `status` TEXT NOT NULL, `contentHash` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "recordId",
+            "columnName": "recordId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localUri",
+            "columnName": "localUri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileName",
+            "columnName": "fileName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileSize",
+            "columnName": "fileSize",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastModified",
+            "columnName": "lastModified",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetAccountId",
+            "columnName": "targetAccountId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetFolderId",
+            "columnName": "targetFolderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cloudFileId",
+            "columnName": "cloudFileId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "uploadedAt",
+            "columnName": "uploadedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentHash",
+            "columnName": "contentHash",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "recordId"
+          ]
+        }
+      },
+      {
+        "tableName": "exclusions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `pattern` TEXT NOT NULL, `isRegex` INTEGER NOT NULL, `enabled` INTEGER NOT NULL, `ruleType` TEXT NOT NULL, `sizeLimitBytes` INTEGER, `sourceUri` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pattern",
+            "columnName": "pattern",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isRegex",
+            "columnName": "isRegex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ruleType",
+            "columnName": "ruleType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeLimitBytes",
+            "columnName": "sizeLimitBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sourceUri",
+            "columnName": "sourceUri",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "transfers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `accountId` TEXT NOT NULL, `fileId` TEXT, `fileName` TEXT NOT NULL, `localPath` TEXT, `remotePath` TEXT, `direction` TEXT NOT NULL, `status` TEXT NOT NULL, `bytesTransferred` INTEGER NOT NULL, `totalBytes` INTEGER NOT NULL, `errorMessage` TEXT, `providerSessionId` TEXT, `chunkSize` INTEGER NOT NULL, `nextChunkIndex` INTEGER NOT NULL, `checksum` TEXT, `idempotencyKey` TEXT, `attemptCount` INTEGER NOT NULL, `state` TEXT NOT NULL, `priority` INTEGER NOT NULL, `operationType` TEXT NOT NULL, `providerType` TEXT, `remoteId` TEXT, `parentFolderId` TEXT, `localUri` TEXT, `bytesPerSecond` INTEGER NOT NULL, `etaSeconds` INTEGER, `lastProgressAt` INTEGER, `lastAttemptAt` INTEGER, `nextAttemptAt` INTEGER, `leaseOwner` TEXT, `leaseExpiresAt` INTEGER, `lastErrorCode` TEXT, `lastErrorMessage` TEXT, `lastHttpStatus` INTEGER, `correlationId` TEXT, `isEncrypted` INTEGER NOT NULL, `encryptionFormatVersion` INTEGER, `encryptionKeyId` TEXT, `encryptedMetadata` TEXT, `encryptedSizeBytes` INTEGER, `encryptedChecksum` TEXT, `opaqueRemoteName` TEXT, `encryptedStagePath` TEXT, `plaintextSizeBytes` INTEGER, `originalMetadataAvailable` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileId",
+            "columnName": "fileId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "fileName",
+            "columnName": "fileName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localPath",
+            "columnName": "localPath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remotePath",
+            "columnName": "remotePath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "direction",
+            "columnName": "direction",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bytesTransferred",
+            "columnName": "bytesTransferred",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "totalBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "errorMessage",
+            "columnName": "errorMessage",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "providerSessionId",
+            "columnName": "providerSessionId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "chunkSize",
+            "columnName": "chunkSize",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextChunkIndex",
+            "columnName": "nextChunkIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checksum",
+            "columnName": "checksum",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "idempotencyKey",
+            "columnName": "idempotencyKey",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attemptCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "state",
+            "columnName": "state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priority",
+            "columnName": "priority",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "operationType",
+            "columnName": "operationType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerType",
+            "columnName": "providerType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteId",
+            "columnName": "remoteId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "parentFolderId",
+            "columnName": "parentFolderId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "localUri",
+            "columnName": "localUri",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "bytesPerSecond",
+            "columnName": "bytesPerSecond",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "etaSeconds",
+            "columnName": "etaSeconds",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastProgressAt",
+            "columnName": "lastProgressAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastAttemptAt",
+            "columnName": "lastAttemptAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "nextAttemptAt",
+            "columnName": "nextAttemptAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "leaseOwner",
+            "columnName": "leaseOwner",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "leaseExpiresAt",
+            "columnName": "leaseExpiresAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "lastErrorCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorMessage",
+            "columnName": "lastErrorMessage",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastHttpStatus",
+            "columnName": "lastHttpStatus",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "correlationId",
+            "columnName": "correlationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isEncrypted",
+            "columnName": "isEncrypted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "encryptionFormatVersion",
+            "columnName": "encryptionFormatVersion",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "encryptionKeyId",
+            "columnName": "encryptionKeyId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "encryptedMetadata",
+            "columnName": "encryptedMetadata",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "encryptedSizeBytes",
+            "columnName": "encryptedSizeBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "encryptedChecksum",
+            "columnName": "encryptedChecksum",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "opaqueRemoteName",
+            "columnName": "opaqueRemoteName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "encryptedStagePath",
+            "columnName": "encryptedStagePath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "plaintextSizeBytes",
+            "columnName": "plaintextSizeBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "originalMetadataAvailable",
+            "columnName": "originalMetadataAvailable",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_transfers_status_updatedAt",
+            "unique": false,
+            "columnNames": [
+              "status",
+              "updatedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfers_status_updatedAt` ON `${TABLE_NAME}` (`status`, `updatedAt`)"
+          },
+          {
+            "name": "index_transfers_accountId_createdAt",
+            "unique": false,
+            "columnNames": [
+              "accountId",
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfers_accountId_createdAt` ON `${TABLE_NAME}` (`accountId`, `createdAt`)"
+          },
+          {
+            "name": "index_transfers_idempotencyKey",
+            "unique": false,
+            "columnNames": [
+              "idempotencyKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfers_idempotencyKey` ON `${TABLE_NAME}` (`idempotencyKey`)"
+          },
+          {
+            "name": "index_transfers_state_priority_createdAt",
+            "unique": false,
+            "columnNames": [
+              "state",
+              "priority",
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfers_state_priority_createdAt` ON `${TABLE_NAME}` (`state`, `priority`, `createdAt`)"
+          },
+          {
+            "name": "index_transfers_leaseExpiresAt",
+            "unique": false,
+            "columnNames": [
+              "leaseExpiresAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfers_leaseExpiresAt` ON `${TABLE_NAME}` (`leaseExpiresAt`)"
+          },
+          {
+            "name": "index_transfers_providerType_remoteId",
+            "unique": false,
+            "columnNames": [
+              "providerType",
+              "remoteId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfers_providerType_remoteId` ON `${TABLE_NAME}` (`providerType`, `remoteId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "storage_summary",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`accountId` TEXT NOT NULL, `accountType` TEXT NOT NULL, `usedBytes` INTEGER NOT NULL, `totalBytes` INTEGER, `fileCount` INTEGER, `categoriesJson` TEXT, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`accountId`))",
+        "fields": [
+          {
+            "fieldPath": "accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountType",
+            "columnName": "accountType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "usedBytes",
+            "columnName": "usedBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "totalBytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "fileCount",
+            "columnName": "fileCount",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "categoriesJson",
+            "columnName": "categoriesJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "accountId"
+          ]
+        }
+      },
+      {
+        "tableName": "folder_sync_meta",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`accountKey` TEXT NOT NULL, `folderId` TEXT NOT NULL, `etag` TEXT, `lastSyncedAt` INTEGER NOT NULL, `providerType` TEXT NOT NULL, `syncState` TEXT NOT NULL, `lastRequestedAt` INTEGER, `lastSuccessfulAt` INTEGER, `lastAttemptAt` INTEGER, `nextAttemptAt` INTEGER, `isCompleteSnapshot` INTEGER NOT NULL, `continuationToken` TEXT, `remoteRevision` TEXT, `lastErrorCode` TEXT, `lastErrorMessage` TEXT, PRIMARY KEY(`accountKey`, `folderId`))",
+        "fields": [
+          {
+            "fieldPath": "accountKey",
+            "columnName": "accountKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "folderId",
+            "columnName": "folderId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "etag",
+            "columnName": "etag",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastSyncedAt",
+            "columnName": "lastSyncedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerType",
+            "columnName": "providerType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncState",
+            "columnName": "syncState",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastRequestedAt",
+            "columnName": "lastRequestedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastSuccessfulAt",
+            "columnName": "lastSuccessfulAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastAttemptAt",
+            "columnName": "lastAttemptAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "nextAttemptAt",
+            "columnName": "nextAttemptAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "isCompleteSnapshot",
+            "columnName": "isCompleteSnapshot",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "continuationToken",
+            "columnName": "continuationToken",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteRevision",
+            "columnName": "remoteRevision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "lastErrorCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorMessage",
+            "columnName": "lastErrorMessage",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "accountKey",
+            "folderId"
+          ]
+        }
+      },
+      {
+        "tableName": "file_mutations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`operationId` TEXT NOT NULL, `accountId` TEXT, `operation` TEXT NOT NULL, `fileId` TEXT, `name` TEXT, `parentFolderId` TEXT NOT NULL DEFAULT 'root', `optimisticFileId` TEXT, `status` TEXT NOT NULL DEFAULT 'PENDING', `retryCount` INTEGER NOT NULL DEFAULT 0, `lastError` TEXT, `providerType` TEXT, `remoteFileId` TEXT, `payloadJson` TEXT, `attemptCount` INTEGER NOT NULL, `nextAttemptAt` INTEGER, `lastErrorCode` TEXT, `lastErrorMessage` TEXT, `correlationId` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`operationId`))",
+        "fields": [
+          {
+            "fieldPath": "operationId",
+            "columnName": "operationId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "operation",
+            "columnName": "operation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fileId",
+            "columnName": "fileId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "parentFolderId",
+            "columnName": "parentFolderId",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'root'"
+          },
+          {
+            "fieldPath": "optimisticFileId",
+            "columnName": "optimisticFileId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'PENDING'"
+          },
+          {
+            "fieldPath": "retryCount",
+            "columnName": "retryCount",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "providerType",
+            "columnName": "providerType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "remoteFileId",
+            "columnName": "remoteFileId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payloadJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attemptCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextAttemptAt",
+            "columnName": "nextAttemptAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "lastErrorCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorMessage",
+            "columnName": "lastErrorMessage",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "correlationId",
+            "columnName": "correlationId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "operationId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_file_mutations_status_nextAttemptAt_createdAt",
+            "unique": false,
+            "columnNames": [
+              "status",
+              "nextAttemptAt",
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_file_mutations_status_nextAttemptAt_createdAt` ON `${TABLE_NAME}` (`status`, `nextAttemptAt`, `createdAt`)"
+          },
+          {
+            "name": "index_file_mutations_accountId_parentFolderId",
+            "unique": false,
+            "columnNames": [
+              "accountId",
+              "parentFolderId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_file_mutations_accountId_parentFolderId` ON `${TABLE_NAME}` (`accountId`, `parentFolderId`)"
+          },
+          {
+            "name": "index_file_mutations_accountId_remoteFileId_status",
+            "unique": false,
+            "columnNames": [
+              "accountId",
+              "remoteFileId",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_file_mutations_accountId_remoteFileId_status` ON `${TABLE_NAME}` (`accountId`, `remoteFileId`, `status`)"
+          }
+        ]
+      },
+      {
+        "tableName": "file_tombstones",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`tombstoneId` TEXT NOT NULL, `accountId` TEXT NOT NULL, `providerType` TEXT NOT NULL, `remoteId` TEXT NOT NULL, `folderId` TEXT, `deletedAt` INTEGER NOT NULL, `sourceRevision` TEXT, PRIMARY KEY(`tombstoneId`))",
+        "fields": [
+          {
+            "fieldPath": "tombstoneId",
+            "columnName": "tombstoneId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerType",
+            "columnName": "providerType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteId",
+            "columnName": "remoteId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "folderId",
+            "columnName": "folderId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "deletedAt",
+            "columnName": "deletedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRevision",
+            "columnName": "sourceRevision",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "tombstoneId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_file_tombstones_accountId_providerType_folderId",
+            "unique": false,
+            "columnNames": [
+              "accountId",
+              "providerType",
+              "folderId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_file_tombstones_accountId_providerType_folderId` ON `${TABLE_NAME}` (`accountId`, `providerType`, `folderId`)"
+          },
+          {
+            "name": "index_file_tombstones_remoteId",
+            "unique": false,
+            "columnNames": [
+              "remoteId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_file_tombstones_remoteId` ON `${TABLE_NAME}` (`remoteId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "thumbnail_cache",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`cacheKey` TEXT NOT NULL, `accountId` TEXT NOT NULL, `providerType` TEXT NOT NULL, `remoteId` TEXT NOT NULL, `sourceRevision` TEXT, `path` TEXT NOT NULL, `mimeType` TEXT NOT NULL, `width` INTEGER, `height` INTEGER, `sizeBytes` INTEGER NOT NULL, `isEncrypted` INTEGER NOT NULL, `generatedAt` INTEGER NOT NULL, `lastAccessAt` INTEGER NOT NULL, `failureCount` INTEGER NOT NULL, `nextRetryAt` INTEGER, PRIMARY KEY(`cacheKey`))",
+        "fields": [
+          {
+            "fieldPath": "cacheKey",
+            "columnName": "cacheKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountId",
+            "columnName": "accountId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerType",
+            "columnName": "providerType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteId",
+            "columnName": "remoteId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRevision",
+            "columnName": "sourceRevision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "path",
+            "columnName": "path",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mimeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "width",
+            "columnName": "width",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "sizeBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isEncrypted",
+            "columnName": "isEncrypted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "generatedAt",
+            "columnName": "generatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastAccessAt",
+            "columnName": "lastAccessAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "failureCount",
+            "columnName": "failureCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextRetryAt",
+            "columnName": "nextRetryAt",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "cacheKey"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_thumbnail_cache_accountId_lastAccessAt",
+            "unique": false,
+            "columnNames": [
+              "accountId",
+              "lastAccessAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_thumbnail_cache_accountId_lastAccessAt` ON `${TABLE_NAME}` (`accountId`, `lastAccessAt`)"
+          },
+          {
+            "name": "index_thumbnail_cache_providerType_remoteId",
+            "unique": false,
+            "columnNames": [
+              "providerType",
+              "remoteId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_thumbnail_cache_providerType_remoteId` ON `${TABLE_NAME}` (`providerType`, `remoteId`)"
+          },
+          {
+            "name": "index_thumbnail_cache_lastAccessAt",
+            "unique": false,
+            "columnNames": [
+              "lastAccessAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_thumbnail_cache_lastAccessAt` ON `${TABLE_NAME}` (`lastAccessAt`)"
+          }
+        ]
+      },
+      {
+        "tableName": "backup_sources",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `treeUri` TEXT NOT NULL, `displayName` TEXT NOT NULL, `presetType` TEXT NOT NULL, `targetAccountId` TEXT, `targetFolderId` TEXT, `enabled` INTEGER NOT NULL, `permissionStatus` TEXT NOT NULL, `lastScanAt` INTEGER NOT NULL, `lastBackupAt` INTEGER NOT NULL, `lastSummary` TEXT, `lastError` TEXT, `lastQueuedCount` INTEGER NOT NULL, `lastSkippedCount` INTEGER NOT NULL, `lastFailedCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "treeUri",
+            "columnName": "treeUri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "presetType",
+            "columnName": "presetType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetAccountId",
+            "columnName": "targetAccountId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "targetFolderId",
+            "columnName": "targetFolderId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "permissionStatus",
+            "columnName": "permissionStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastScanAt",
+            "columnName": "lastScanAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastBackupAt",
+            "columnName": "lastBackupAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSummary",
+            "columnName": "lastSummary",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastError",
+            "columnName": "lastError",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastQueuedCount",
+            "columnName": "lastQueuedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSkippedCount",
+            "columnName": "lastSkippedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastFailedCount",
+            "columnName": "lastFailedCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_backup_sources_treeUri",
+            "unique": true,
+            "columnNames": [
+              "treeUri"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_backup_sources_treeUri` ON `${TABLE_NAME}` (`treeUri`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '454c0f4aa8c152a4127d7c6b7365fa26')"
+    ]
+  }
+}

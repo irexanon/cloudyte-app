@@ -77,4 +77,10 @@ object FileRepository {
         }
         return null
     }
+
+    fun clear() {
+        filesCache.clear()
+        activeList = emptyList()
+        activeAccountId = null
+    }
 }
