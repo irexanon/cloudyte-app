@@ -126,8 +126,7 @@ fun GDriveImagePage(
                 onSuccess = { ready -> localPreviewFile = ready },
                 onFailure = { err -> encryptedError = err.message ?: "Unable to decrypt preview" }
             )
-        } else if (app != null) {
-            // 4. Fetch fast 512px preview (~40 KB) so user sees crisp image quickly while full-res loads.
+        } else if (app != null && thumbnailPlaceholderFile == null) {
             val providerType = withContext(Dispatchers.IO) {
                 app.container.database.accountDao().getAccountById(acc)?.accountType ?: "tgdrive"
             }
@@ -136,7 +135,7 @@ fun GDriveImagePage(
                     accountId = acc,
                     providerType = providerType,
                     file = file,
-                    sizePx = 512,
+                    sizePx = 256,
                     localSource = null
                 )
             }
@@ -151,7 +150,7 @@ fun GDriveImagePage(
 
     val previewUrl = remember(file.isEncrypted, resolvedAccId, file.effectiveId) {
         if (!file.isEncrypted && resolvedAccId.isNotBlank() && file.effectiveId.isNotBlank()) {
-            ApiClient.getCleanDownloadUrl(resolvedAccId, file.effectiveId, preview = true)
+            ApiClient.getFileUrl(resolvedAccId, file.effectiveId, preview = true)
         } else {
             ""
         }

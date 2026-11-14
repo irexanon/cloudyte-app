@@ -164,7 +164,7 @@ fun GDriveVideoContent(
                 playbackError = "Unable to prepare encrypted video"
                 null
             } else {
-                MediaItem.fromUri(ApiClient.getCleanDownloadUrl(acc, file.effectiveId, preview = true))
+                MediaItem.fromUri(ApiClient.getFileUrl(acc, file.effectiveId, preview = true))
             }
         } else {
             val cached = PreviewFetcher.resolveCachedOnly(context, acc, file)
@@ -172,7 +172,7 @@ fun GDriveVideoContent(
             if (cached != null) {
                 MediaItem.fromUri(Uri.fromFile(cached))
             } else {
-                MediaItem.fromUri(ApiClient.getCleanDownloadUrl(acc, file.effectiveId, preview = true))
+                MediaItem.fromUri(ApiClient.getFileUrl(acc, file.effectiveId, preview = true))
             }
         }
 

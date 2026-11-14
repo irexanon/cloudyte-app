@@ -140,7 +140,7 @@ fun AudioPlayerScreen(
 
     val audioUrl = remember(effectiveAccId, fileId) {
         val acc = effectiveAccId.ifBlank { accountId }
-        ApiClient.getCleanDownloadUrl(acc, fileId, preview = true)
+        ApiClient.getFileUrl(acc, fileId, preview = true)
     }
 
     val prefsState by UserPreferences.observe(context).collectAsState(initial = UserPreferencesState())

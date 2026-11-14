@@ -193,7 +193,7 @@ fun ImageViewerScreen(
                     if (adjAcc.isNotBlank() && adj.effectiveId.isNotBlank()) {
                         val rev = adj.updatedAt?.toString() ?: adj.time?.toString() ?: adj.sizeBytes.toString()
                         val cacheKey = "img_preview_${adjAcc}_${adj.effectiveId}_$rev"
-                        val url = ApiClient.getCleanDownloadUrl(adjAcc, adj.effectiveId, preview = true)
+                        val url = ApiClient.getFileUrl(adjAcc, adj.effectiveId, preview = true)
                         loader.enqueue(
                             ImageRequest.Builder(context)
                                 .data(url)
