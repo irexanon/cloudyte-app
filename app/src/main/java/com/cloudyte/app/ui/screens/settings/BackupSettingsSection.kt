@@ -1,5 +1,8 @@
 package com.cloudyte.app.ui.screens.settings
 
+import android.Manifest
+import android.net.Uri
+import android.os.Build
 import android.text.format.DateFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -73,6 +76,7 @@ import com.cloudyte.app.db.BackupSourcePermissionStatus
 import com.cloudyte.app.db.LocalAccount
 import com.cloudyte.app.sync.AutoSyncManager
 import com.cloudyte.app.sync.BackupSourceManager
+import com.cloudyte.app.sync.PermissionsHelper
 import com.cloudyte.app.sync.SyncLogger
 import com.cloudyte.app.sync.SyncPreferences
 import com.cloudyte.app.sync.SyncState
@@ -103,6 +107,7 @@ fun BackupSettingsSection(
     val syncStatus by SyncLogger.statusFlow.collectAsState()
 
     var accounts by remember { mutableStateOf<List<Account>>(emptyList()) }
+    var hasFullStorageAccess by remember { mutableStateOf(PermissionsHelper.isFullStorageAccessGranted(context)) }
     var pendingPreset by remember { mutableStateOf(BackupPresetType.CUSTOM) }
     var pendingRegrantId by remember { mutableStateOf<String?>(null) }
     var sourcePendingDelete by remember { mutableStateOf<BackupSourceEntity?>(null) }
@@ -112,8 +117,16 @@ fun BackupSettingsSection(
     var showMaxSizeDialog by remember { mutableStateOf(false) }
     var showConfirmDeleteLocal by remember { mutableStateOf(false) }
 
+    val legacyStorageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        hasFullStorageAccess = PermissionsHelper.isFullStorageAccessGranted(context)
+        scope.launch { BackupSourceManager.refreshAllSourceHealth(context, db) }
+    }
+
     LaunchedEffect(Unit) {
         SyncLogger.init(context)
+        hasFullStorageAccess = PermissionsHelper.isFullStorageAccessGranted(context)
         BackupSourceManager.refreshAllSourceHealth(context, db)
         runCatching {
             val cached = db.accountDao().getAllAccounts()
@@ -131,6 +144,7 @@ fun BackupSettingsSection(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                hasFullStorageAccess = PermissionsHelper.isFullStorageAccessGranted(context)
                 scope.launch { BackupSourceManager.refreshAllSourceHealth(context, db) }
             }
         }
@@ -404,6 +418,53 @@ fun BackupSettingsSection(
     Spacer(modifier = Modifier.height(8.dp))
     SettingsSectionTitle(stringResource(R.string.settings_backup_folders))
 
+    if (!hasFullStorageAccess) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_perm_full_storage),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Text(
+                    text = stringResource(R.string.settings_perm_full_storage_rationale),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Button(
+                    onClick = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            context.startActivity(PermissionsHelper.buildAllFilesAccessSettingsIntent(context))
+                        } else {
+                            legacyStorageLauncher.launch(
+                                arrayOf(
+                                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                                )
+                            )
+                        }
+                    },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("backup_grant_full_storage_button")
+                ) {
+                    Text(stringResource(R.string.settings_perm_grant_full_storage))
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+    }
+
     val activeSourcesCount = sources.count { it.enabled }
     if (prefsState.autoBackupEnabled && activeSourcesCount == 0) {
         Surface(
@@ -465,62 +526,109 @@ fun BackupSettingsSection(
                             onChange = { wantEnable ->
                                 when {
                                     linkedSource == null -> {
-                                        val parentGrant = BackupSourceManager.findParentTreeGrantForRelativePath(
-                                            context,
-                                            preset.relativePath
-                                        )
-                                        if (parentGrant != null) {
-                                            val derivedUri = BackupSourceManager.buildSubfolderTreeUri(
-                                                parentGrant.first,
-                                                parentGrant.second
-                                            )
+                                        val directDir = if (hasFullStorageAccess) {
+                                            BackupSourceManager.resolveDirectPresetFile(preset)?.also { dir ->
+                                                if (!dir.exists()) runCatching { dir.mkdirs() }
+                                            }?.takeIf { it.exists() && it.isDirectory && it.canRead() }
+                                        } else null
+
+                                        if (directDir != null) {
                                             scope.launch {
                                                 val result = BackupSourceManager.persistAndAddSource(
                                                     context = context,
-                                                    treeUri = derivedUri,
+                                                    treeUri = Uri.fromFile(directDir),
                                                     presetType = preset,
                                                     targetAccountId = null,
                                                     db = db
                                                 )
                                                 result.onSuccess { added ->
-                                                    snackbarHostState.showSnackbar("Enabled '${added.displayName}' using existing folder grant.")
+                                                    snackbarHostState.showSnackbar("Enabled '${added.displayName}' with full storage access.")
                                                 }.onFailure {
                                                     pendingPreset = preset
                                                     addFolderLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
                                                 }
                                             }
                                         } else {
-                                            pendingPreset = preset
-                                            addFolderLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                            val parentGrant = BackupSourceManager.findParentTreeGrantForRelativePath(
+                                                context,
+                                                preset.relativePath
+                                            )
+                                            if (parentGrant != null) {
+                                                val derivedUri = BackupSourceManager.buildSubfolderTreeUri(
+                                                    parentGrant.first,
+                                                    parentGrant.second
+                                                )
+                                                scope.launch {
+                                                    val result = BackupSourceManager.persistAndAddSource(
+                                                        context = context,
+                                                        treeUri = derivedUri,
+                                                        presetType = preset,
+                                                        targetAccountId = null,
+                                                        db = db
+                                                    )
+                                                    result.onSuccess { added ->
+                                                        snackbarHostState.showSnackbar("Enabled '${added.displayName}' using existing folder grant.")
+                                                    }.onFailure {
+                                                        pendingPreset = preset
+                                                        addFolderLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                                    }
+                                                }
+                                            } else {
+                                                pendingPreset = preset
+                                                addFolderLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                            }
                                         }
                                     }
                                     wantEnable && !isHealthy -> {
-                                        val parentGrant = BackupSourceManager.findParentTreeGrantForRelativePath(
-                                            context,
-                                            preset.relativePath
-                                        )
-                                        if (parentGrant != null) {
-                                            val derivedUri = BackupSourceManager.buildSubfolderTreeUri(
-                                                parentGrant.first,
-                                                parentGrant.second
-                                            )
+                                        val directDir = if (hasFullStorageAccess) {
+                                            BackupSourceManager.resolveDirectPresetFile(preset)?.also { dir ->
+                                                if (!dir.exists()) runCatching { dir.mkdirs() }
+                                            }?.takeIf { it.exists() && it.isDirectory && it.canRead() }
+                                        } else null
+
+                                        if (directDir != null) {
                                             scope.launch {
                                                 val result = BackupSourceManager.regrantSource(
                                                     context = context,
                                                     sourceId = linkedSource.id,
-                                                    grantedTreeUri = derivedUri,
+                                                    grantedTreeUri = Uri.fromFile(directDir),
                                                     db = db
                                                 )
                                                 result.onSuccess { restored ->
-                                                    snackbarHostState.showSnackbar("Restored '${restored.displayName}' using existing folder grant.")
+                                                    snackbarHostState.showSnackbar("Restored '${restored.displayName}' with full storage access.")
                                                 }.onFailure {
                                                     pendingRegrantId = linkedSource.id
                                                     regrantLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
                                                 }
                                             }
                                         } else {
-                                            pendingRegrantId = linkedSource.id
-                                            regrantLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                            val parentGrant = BackupSourceManager.findParentTreeGrantForRelativePath(
+                                                context,
+                                                preset.relativePath
+                                            )
+                                            if (parentGrant != null) {
+                                                val derivedUri = BackupSourceManager.buildSubfolderTreeUri(
+                                                    parentGrant.first,
+                                                    parentGrant.second
+                                                )
+                                                scope.launch {
+                                                    val result = BackupSourceManager.regrantSource(
+                                                        context = context,
+                                                        sourceId = linkedSource.id,
+                                                        grantedTreeUri = derivedUri,
+                                                        db = db
+                                                    )
+                                                    result.onSuccess { restored ->
+                                                        snackbarHostState.showSnackbar("Restored '${restored.displayName}' using existing folder grant.")
+                                                    }.onFailure {
+                                                        pendingRegrantId = linkedSource.id
+                                                        regrantLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                                    }
+                                                }
+                                            } else {
+                                                pendingRegrantId = linkedSource.id
+                                                regrantLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                            }
                                         }
                                     }
                                     else -> {

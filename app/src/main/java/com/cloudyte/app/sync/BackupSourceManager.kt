@@ -3,6 +3,7 @@ package com.cloudyte.app.sync
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
 import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import com.cloudyte.app.data.UserPreferences
@@ -43,6 +44,13 @@ object BackupSourceManager {
             BackupPresetType.CUSTOM -> return null
         }
         return DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", docId)
+    }
+
+    fun resolveDirectPresetFile(preset: BackupPresetType): File? {
+        val rel = preset.relativePath.trim().trim('/')
+        if (rel.isBlank()) return null
+        val root = Environment.getExternalStorageDirectory() ?: return null
+        return File(root, rel)
     }
 
     fun findSourceForPreset(
@@ -153,6 +161,17 @@ object BackupSourceManager {
 
         if (uri.scheme.equals("file", ignoreCase = true) || source.treeUri.startsWith("/")) {
             val file = uri.path?.let { File(it) } ?: File(source.treeUri)
+            val isExternalSharedPath = file.absolutePath.startsWith(
+                runCatching { Environment.getExternalStorageDirectory().absolutePath }.getOrDefault("/storage")
+            )
+            if (isExternalSharedPath && !PermissionsHelper.isFullStorageAccessGranted(context)) {
+                return BackupSourceHealth(
+                    status = BackupSourcePermissionStatus.REVOKED,
+                    canRead = false,
+                    canWrite = false,
+                    errorMessage = "Full storage access is turned off. Grant All Files Access to resume backups."
+                )
+            }
             return when {
                 !file.exists() -> BackupSourceHealth(
                     status = BackupSourcePermissionStatus.MISSING,

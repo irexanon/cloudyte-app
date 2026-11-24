@@ -194,6 +194,10 @@
     <string name="settings_all_cache_cleared">Cache cleared</string>
 
     <!-- Permissions Section -->
+    <string name="settings_perm_full_storage">Full storage access (All files)</string>
+    <string name="settings_perm_full_storage_allowed">Allowed · Direct backup folder access &amp; public Download/Cloudyte</string>
+    <string name="settings_perm_full_storage_rationale">Grants 1-tap backup folders and saves downloads to Download/Cloudyte</string>
+    <string name="settings_perm_grant_full_storage">Grant full storage access</string>
     <string name="settings_perm_media">Scoped folder access</string>
     <string name="settings_perm_notifications">Notifications</string>
     <string name="settings_perm_notifications_rationale">Shows transfer and backup progress</string>

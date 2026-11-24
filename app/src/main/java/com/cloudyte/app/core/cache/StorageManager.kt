@@ -46,6 +46,13 @@ data class ClearResult(
 
 object StorageManager {
 
+    fun getPublicDownloadsDir(): File {
+        return File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+            "Cloudyte"
+        )
+    }
+
     fun getExportedDownloadDirs(context: Context): List<File> {
         val list = mutableListOf(
             File(context.filesDir, "downloads"),
@@ -54,6 +61,12 @@ object StorageManager {
         context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.let { ext ->
             if (list.none { it.absolutePath == ext.absolutePath }) {
                 list += ext
+            }
+        }
+        if (com.cloudyte.app.sync.PermissionsHelper.isFullStorageAccessGranted(context)) {
+            val pubDir = getPublicDownloadsDir()
+            if (pubDir.exists() && list.none { it.absolutePath == pubDir.absolutePath }) {
+                list += pubDir
             }
         }
         return list
@@ -67,7 +80,15 @@ object StorageManager {
     }
 
     fun getPreferredExportDirSync(context: Context, directorySetting: String): File {
-        val dir = if (directorySetting.equals("EXTERNAL", ignoreCase = true)) {
+        val hasFullStorage = com.cloudyte.app.sync.PermissionsHelper.isFullStorageAccessGranted(context)
+        val dir = if (hasFullStorage) {
+            if (directorySetting.equals("EXTERNAL", ignoreCase = true)) {
+                context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                    ?: getPublicDownloadsDir()
+            } else {
+                getPublicDownloadsDir()
+            }
+        } else if (directorySetting.equals("EXTERNAL", ignoreCase = true)) {
             context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: File(context.filesDir, "downloads")
         } else {

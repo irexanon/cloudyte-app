@@ -108,6 +108,19 @@ fun PermissionsSection(
         }
     }
 
+    val legacyStorageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        scope.launch {
+            reloadPermissions()
+            if (results.values.any { !it }) {
+                snackbarHostState.showSnackbar(
+                    "Storage permission denied. Open Android settings to allow storage access."
+                )
+            }
+        }
+    }
+
     val regrantFolderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
@@ -127,12 +140,43 @@ fun PermissionsSection(
 
     Spacer(modifier = Modifier.height(8.dp))
 
+    val fullStorageGranted = summary.hasFullStorageAccess
     val notifGranted = summary.notificationsState == PermissionState.GRANTED
     val batteryUnrestricted = summary.ignoringBatteryOptimizations
-    val foldersGranted = summary.folderSources.isNotEmpty() && summary.brokenFolderCount == 0
+    val foldersGranted = fullStorageGranted || (summary.folderSources.isNotEmpty() && summary.brokenFolderCount == 0)
     val folderCritical = summary.brokenFolderCount > 0
 
     val permissionItems = listOf(
+        GroupedListItem(key = "perm_full_storage") {
+            TeleWardenPermissionRow(
+                title = stringResource(R.string.settings_perm_full_storage),
+                subtitle = if (fullStorageGranted) {
+                    stringResource(R.string.settings_perm_full_storage_allowed)
+                } else {
+                    stringResource(
+                        R.string.settings_perm_not_allowed_rationale,
+                        stringResource(R.string.settings_perm_full_storage_rationale)
+                    )
+                },
+                granted = fullStorageGranted,
+                critical = !fullStorageGranted,
+                onClick = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        context.startActivity(PermissionsHelper.buildAllFilesAccessSettingsIntent(context))
+                    } else if (fullStorageGranted) {
+                        context.startActivity(PermissionsHelper.buildAppDetailsSettingsIntent(context))
+                    } else {
+                        legacyStorageLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.READ_EXTERNAL_STORAGE,
+                                Manifest.permission.WRITE_EXTERNAL_STORAGE
+                            )
+                        )
+                    }
+                },
+                modifier = Modifier.testTag("perm_all_files_access_row")
+            )
+        },
         GroupedListItem(key = "perm_notif") {
             TeleWardenPermissionRow(
                 title = stringResource(R.string.settings_perm_notifications),
