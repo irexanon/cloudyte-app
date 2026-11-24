@@ -69,8 +69,12 @@ object PermissionsHelper {
     }
 
     fun isIgnoringBatteryOptimizations(context: Context): Boolean {
-        val powerManager = context.getSystemService(PowerManager::class.java) ?: return false
-        return runCatching { powerManager.isIgnoringBatteryOptimizations(context.packageName) }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        val appContext = context.applicationContext
+        val powerManager = (appContext.getSystemService(Context.POWER_SERVICE) as? PowerManager)
+            ?: appContext.getSystemService(PowerManager::class.java)
+            ?: return false
+        return runCatching { powerManager.isIgnoringBatteryOptimizations(appContext.packageName) }
             .getOrDefault(false)
     }
 
@@ -101,29 +105,29 @@ object PermissionsHelper {
         )
     }
 
-    fun buildAllFilesAccessSettingsIntent(context: Context): Intent {
+    fun buildAllFilesAccessSettingsIntent(context: Context, forActivityResult: Boolean = false): Intent {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val appSpecificIntent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                 data = Uri.parse("package:${context.packageName}")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (!forActivityResult) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             if (appSpecificIntent.resolveActivity(context.packageManager) != null) {
                 return appSpecificIntent
             }
             val generalIntent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (!forActivityResult) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             if (generalIntent.resolveActivity(context.packageManager) != null) {
                 return generalIntent
             }
         }
-        return buildAppDetailsSettingsIntent(context)
+        return buildAppDetailsSettingsIntent(context, forActivityResult = forActivityResult)
     }
 
-    fun buildAppDetailsSettingsIntent(context: Context): Intent {
+    fun buildAppDetailsSettingsIntent(context: Context, forActivityResult: Boolean = false): Intent {
         return Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
             data = Uri.fromParts("package", context.packageName, null)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (!forActivityResult) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
     }
 
@@ -131,14 +135,39 @@ object PermissionsHelper {
         return NotificationHelper.buildAppNotificationSettingsIntent(context)
     }
 
-    fun buildBatteryOptimizationSettingsIntent(context: Context): Intent {
+    /**
+     * Requests the direct system Doze whitelist dialog (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)
+     * when battery optimizations are still active, so Android updates
+     * `PowerManager.isIgnoringBatteryOptimizations(packageName)` reliably across OEM skins
+     * (ColorOS, OneUI, MIUI, Pixel). Falls back to the battery optimization list or app details.
+     */
+    fun buildRequestIgnoreBatteryOptimizationsIntent(
+        context: Context,
+        forActivityResult: Boolean = false
+    ): Intent {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations(context)) {
+            val directPrompt = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:${context.packageName}")
+                if (!forActivityResult) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (directPrompt.resolveActivity(context.packageManager) != null) {
+                return directPrompt
+            }
+        }
+        return buildBatteryOptimizationSettingsIntent(context, forActivityResult = forActivityResult)
+    }
+
+    fun buildBatteryOptimizationSettingsIntent(
+        context: Context,
+        forActivityResult: Boolean = false
+    ): Intent {
         val batteryIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (!forActivityResult) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return if (batteryIntent.resolveActivity(context.packageManager) != null) {
             batteryIntent
         } else {
-            buildAppDetailsSettingsIntent(context)
+            buildAppDetailsSettingsIntent(context, forActivityResult = forActivityResult)
         }
     }
 }

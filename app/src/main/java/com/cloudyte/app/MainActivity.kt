@@ -113,6 +113,15 @@ class MainActivity : ComponentActivity() {
                 ApiClient.setDebugLogging(prefs.debugLogging)
             }
 
+            LaunchedEffect(startupReady, prefs.colorTheme) {
+                if (startupReady) {
+                    com.cloudyte.app.ui.theme.AppIconManager.syncWithColorTheme(
+                        this@MainActivity,
+                        prefs.colorTheme
+                    )
+                }
+            }
+
             val lifecycleOwner = LocalLifecycleOwner.current
             var lastBackgroundMs by remember { mutableLongStateOf(0L) }
             var isLocked by remember { mutableStateOf(initialPrefs.appLockEnabled) }

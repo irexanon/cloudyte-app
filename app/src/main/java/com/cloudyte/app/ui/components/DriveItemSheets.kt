@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.OfflinePin
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,13 +71,20 @@ enum class FileQuickFilter(
     val icon: ImageVector? = null
 ) {
     ALL("All", null),
-    OFFLINE("Available offline", Icons.Default.OfflinePin),
+    MEDIA("Media", Icons.Default.PhotoLibrary),
     PHOTOS("Photos", Icons.Default.Image),
     VIDEOS("Videos", Icons.Default.Movie),
+    OFFLINE("Available offline", Icons.Default.OfflinePin),
     DOCUMENTS("Documents", Icons.Default.PictureAsPdf),
     AUDIO("Audio", Icons.Default.MusicNote),
     ARCHIVES("Archives", Icons.Default.FolderZip),
     ENCRYPTED("Encrypted", Icons.Default.Lock);
+
+    val isRecursiveMediaFilter: Boolean
+        get() = this == MEDIA || this == PHOTOS || this == VIDEOS || this == AUDIO
+
+    val isGalleryFilter: Boolean
+        get() = this == MEDIA || this == PHOTOS || this == VIDEOS
 
     fun matches(file: CloudFile, downloadedIds: Set<String>): Boolean {
         if (this == ALL) return true
@@ -84,6 +92,7 @@ enum class FileQuickFilter(
         if (this == ENCRYPTED) return file.isEncrypted
         if (file.isFolderItem) return false
         return when (this) {
+            MEDIA -> file.isImage || file.isVideo
             PHOTOS -> file.isImage
             VIDEOS -> file.isVideo
             AUDIO -> file.isAudio
@@ -234,6 +243,11 @@ fun FilesFilterSortSheet(
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Text(
+                text = "Media, Photos & Videos open as a gallery including all subfolders",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+            )
             Spacer(modifier = Modifier.height(8.dp))
 
             androidx.compose.foundation.layout.FlowRow(
@@ -251,7 +265,11 @@ fun FilesFilterSortSheet(
                     FilterChip(
                         selected = selected,
                         onClick = {
-                            onSelectFilter(if (selected && filter != FileQuickFilter.ALL) FileQuickFilter.ALL else filter)
+                            val next = if (selected && filter != FileQuickFilter.ALL) FileQuickFilter.ALL else filter
+                            onSelectFilter(next)
+                            if (next.isGalleryFilter) {
+                                onDismiss()
+                            }
                         },
                         label = {
                             Text(

@@ -1038,7 +1038,19 @@ fun SettingsSectionScreen(
                 selectedIndex = if (prefsState.colorTheme == ColorTheme.NOIR) 1 else 0,
                 onSelect = { idx ->
                     val theme = if (idx == 1) ColorTheme.NOIR else ColorTheme.DEFAULT
-                    scope.launch { UserPreferences.setColorTheme(context, theme) }
+                    scope.launch {
+                        UserPreferences.setColorTheme(context, theme)
+                        val iconChanged = com.cloudyte.app.ui.theme.AppIconManager.syncWithColorTheme(context, theme)
+                        if (iconChanged) {
+                            snackbarHostState.showSnackbar(
+                                if (theme == ColorTheme.NOIR) {
+                                    "Noir theme & monochrome launcher icon enabled"
+                                } else {
+                                    "Default theme & launcher icon restored"
+                                }
+                            )
+                        }
+                    }
                 },
                 onDismiss = { activeDialogType = null }
             )

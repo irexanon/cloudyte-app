@@ -89,9 +89,49 @@ fun MainScreen(rootNavController: NavController) {
     val filesViewModel: FilesViewModel = viewModel()
     val prefsState by UserPreferences.observe(context).collectAsState(initial = UserPreferencesState())
     val hasInitialContent by homeViewModel.hasInitialContent.collectAsStateWithLifecycle()
+    val homeAccounts by homeViewModel.accounts.collectAsStateWithLifecycle()
+    val isHomeRefreshing by homeViewModel.isLoading.collectAsStateWithLifecycle()
+    val homeError by homeViewModel.errorMessage.collectAsStateWithLifecycle()
+    val homeProfile by homeViewModel.profile.collectAsStateWithLifecycle()
     val navBackStackEntry by bottomNavController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: "home"
     var isSettingsInSubScreen by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    var enteredOnboarding by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    var onboardingDismissed by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        homeViewModel.loadData(forceStorageRefresh = false)
+    }
+
+    androidx.compose.runtime.LaunchedEffect(hasInitialContent, isHomeRefreshing, homeError, homeAccounts.size, onboardingDismissed) {
+        if (hasInitialContent && !isHomeRefreshing && homeError == null && homeAccounts.isEmpty() && !onboardingDismissed) {
+            enteredOnboarding = true
+        }
+    }
+
+    if (enteredOnboarding && !onboardingDismissed) {
+        OnboardingSetupScreen(
+            username = homeProfile?.username,
+            accounts = homeAccounts,
+            isRefreshing = isHomeRefreshing,
+            onRefreshAccounts = {
+                homeViewModel.loadData(forceStorageRefresh = true)
+                filesViewModel.refresh(force = true)
+            },
+            onFinish = {
+                onboardingDismissed = true
+                enteredOnboarding = false
+                homeViewModel.loadData(forceStorageRefresh = true)
+                filesViewModel.refresh(force = true)
+            },
+            onSkip = {
+                onboardingDismissed = true
+                enteredOnboarding = false
+            }
+        )
+        return
+    }
 
     val app = context.applicationContext as? com.cloudyte.app.CloudyteApplication
     val activeTransfers by remember(app) {

@@ -77,8 +77,12 @@ fun PermissionsSection(
     }
     var pendingRegrantSourceId by remember { mutableStateOf<String?>(null) }
 
-    suspend fun reloadPermissions() {
+    suspend fun reloadPermissions(withDelayedRecheck: Boolean = false) {
         summary = PermissionsHelper.inspectAppPermissions(context)
+        if (withDelayedRecheck) {
+            kotlinx.coroutines.delay(350L)
+            summary = PermissionsHelper.inspectAppPermissions(context)
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -88,11 +92,17 @@ fun PermissionsSection(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                scope.launch { reloadPermissions() }
+                scope.launch { reloadPermissions(withDelayedRecheck = true) }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val settingsResultLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        scope.launch { reloadPermissions(withDelayedRecheck = true) }
     }
 
     val notifPermissionLauncher = rememberLauncherForActivityResult(
@@ -162,7 +172,13 @@ fun PermissionsSection(
                 critical = !fullStorageGranted,
                 onClick = {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        context.startActivity(PermissionsHelper.buildAllFilesAccessSettingsIntent(context))
+                        runCatching {
+                            settingsResultLauncher.launch(
+                                PermissionsHelper.buildAllFilesAccessSettingsIntent(context, forActivityResult = true)
+                            )
+                        }.onFailure {
+                            context.startActivity(PermissionsHelper.buildAllFilesAccessSettingsIntent(context))
+                        }
                     } else if (fullStorageGranted) {
                         context.startActivity(PermissionsHelper.buildAppDetailsSettingsIntent(context))
                     } else {
@@ -216,7 +232,16 @@ fun PermissionsSection(
                 granted = batteryUnrestricted,
                 critical = false,
                 onClick = {
-                    context.startActivity(PermissionsHelper.buildBatteryOptimizationSettingsIntent(context))
+                    val intent = if (batteryUnrestricted) {
+                        PermissionsHelper.buildBatteryOptimizationSettingsIntent(context, forActivityResult = true)
+                    } else {
+                        PermissionsHelper.buildRequestIgnoreBatteryOptimizationsIntent(context, forActivityResult = true)
+                    }
+                    runCatching {
+                        settingsResultLauncher.launch(intent)
+                    }.onFailure {
+                        context.startActivity(PermissionsHelper.buildBatteryOptimizationSettingsIntent(context))
+                    }
                 },
                 modifier = Modifier.testTag("perm_battery_row")
             )

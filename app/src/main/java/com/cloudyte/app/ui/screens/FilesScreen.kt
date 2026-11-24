@@ -170,7 +170,9 @@ import com.cloudyte.app.db.TransferDirection
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.OfflinePin
 import androidx.compose.material3.CircularProgressIndicator
+import com.cloudyte.app.api.FileRepository
 import com.cloudyte.app.api.OfflineFileManager
+import com.cloudyte.app.data.DriveTransferManager
 import com.cloudyte.app.features.player.GDriveInfoBottomSheet
 import com.cloudyte.app.features.player.performShareFileLink
 import com.cloudyte.app.ui.components.AppLoadingIndicator
@@ -181,6 +183,8 @@ import com.cloudyte.app.ui.components.FileQuickFilter
 import com.cloudyte.app.ui.components.FilesFilterSortSheet
 import com.cloudyte.app.ui.components.FileThumb
 import com.cloudyte.app.ui.components.LocalBottomBarInset
+import com.cloudyte.app.ui.components.MediaGalleryScopeBar
+import com.cloudyte.app.ui.components.MediaGalleryTile
 import com.cloudyte.app.ui.components.TrashBottomSheet
 import com.cloudyte.app.ui.navigation.NavigationTransitions
 import com.cloudyte.app.ui.openFileInViewer
@@ -377,6 +381,12 @@ class FilesViewModel(
     private val _globalSearchResults = MutableStateFlow<List<CloudFile>>(emptyList())
     private var searchJob: Job? = null
 
+    private val _recursiveMediaFiles = MutableStateFlow<List<CloudFile>>(emptyList())
+    private val _isLoadingRecursiveMedia = MutableStateFlow(false)
+    val isLoadingRecursiveMedia: StateFlow<Boolean> = _isLoadingRecursiveMedia.asStateFlow()
+    private var recursiveMediaJob: Job? = null
+    private var lastRecursiveMediaScope: Pair<String?, String?>? = null
+
     private val _searchFocusTrigger = MutableStateFlow(0)
     val searchFocusTrigger: StateFlow<Int> = _searchFocusTrigger.asStateFlow()
 
@@ -384,12 +394,12 @@ class FilesViewModel(
         files,
         _searchQuery,
         _quickFilter,
-        _globalSearchResults,
+        combine(_globalSearchResults, _recursiveMediaFiles) { deep, media -> deep to media },
         combine(
             UserPreferences.observe(application),
             OfflineFileManager.downloadedFiles
         ) { prefs, downloaded -> prefs to downloaded }
-    ) { currentFiles, query, filter, deepMatches, (prefs, downloadedIds) ->
+    ) { currentFiles, query, filter, (deepMatches, recursiveMedia), (prefs, downloadedIds) ->
         val sortOrder = when {
             prefs.sortField == SortField.NAME && prefs.sortDirection == SortDirection.ASC -> FileSortOrder.NAME_ASC
             prefs.sortField == SortField.NAME && prefs.sortDirection == SortDirection.DESC -> FileSortOrder.NAME_DESC
@@ -399,6 +409,14 @@ class FilesViewModel(
             else -> FileSortOrder.DATE_DESC
         }
         val basePool = when {
+            filter.isRecursiveMediaFilter && query.isNotBlank() -> {
+                val combined = (recursiveMedia + currentFiles + deepMatches)
+                    .distinctBy { it.effectiveId.ifEmpty { it.effectiveName } }
+                combined.filter { it.effectiveName.contains(query, ignoreCase = true) }
+            }
+            filter.isRecursiveMediaFilter -> {
+                (recursiveMedia + currentFiles).distinctBy { it.effectiveId.ifEmpty { it.effectiveName } }
+            }
             query.isNotBlank() -> {
                 val localMatches = currentFiles.filter { it.effectiveName.contains(query, ignoreCase = true) }
                 (localMatches + deepMatches).distinctBy { it.effectiveId.ifEmpty { it.effectiveName } }
@@ -424,8 +442,104 @@ class FilesViewModel(
         .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList<CloudFile>() to emptyList())
 
+    private fun loadRecursiveMedia(filter: FileQuickFilter = _quickFilter.value, force: Boolean = false) {
+        if (!filter.isRecursiveMediaFilter) {
+            recursiveMediaJob?.cancel()
+            _recursiveMediaFiles.value = emptyList()
+            _isLoadingRecursiveMedia.value = false
+            lastRecursiveMediaScope = null
+            return
+        }
+        val accId = currentAccountId.value
+            ?: accounts.value.firstOrNull { it.isDefault == true }?.effectiveId
+            ?: accounts.value.firstOrNull()?.effectiveId
+        if (accId.isNullOrBlank()) {
+            _recursiveMediaFiles.value = emptyList()
+            _isLoadingRecursiveMedia.value = false
+            return
+        }
+        val folderId = currentFolderId.value
+        val scopeKey = accId to folderId
+        if (!force && lastRecursiveMediaScope == scopeKey && _recursiveMediaFiles.value.isNotEmpty()) {
+            return
+        }
+
+        recursiveMediaJob?.cancel()
+        if (lastRecursiveMediaScope != scopeKey) {
+            _recursiveMediaFiles.value = emptyList()
+        }
+        recursiveMediaJob = viewModelScope.launch(Dispatchers.IO) {
+            _isLoadingRecursiveMedia.value = true
+            try {
+                val manifestResult = DriveTransferManager.fetchManifest(
+                    accountId = accId,
+                    folderId = folderId,
+                    maxFiles = 5000
+                )
+                val mappedMedia = manifestResult.fold(
+                    onSuccess = { manifest ->
+                        manifest.files.mapNotNull { item ->
+                            if (item.id.isBlank()) return@mapNotNull null
+                            val parsedEpochMs = item.updatedAt?.let { raw ->
+                                raw.toLongOrNull() ?: runCatching {
+                                    java.time.Instant.parse(raw).toEpochMilli()
+                                }.getOrNull()
+                            }
+                            CloudFile(
+                                id = item.id,
+                                name = item.name,
+                                mimeType = item.mimeType,
+                                size = item.sizeBytes,
+                                time = parsedEpochMs,
+                                createdAt = item.updatedAt,
+                                updatedAt = parsedEpochMs,
+                                thumbUrl = if (!item.isEncrypted) "/api/thumb/$accId/${item.id}?s=320" else null,
+                                location = item.folderPath.takeIf { it.isNotBlank() },
+                                path = item.relativePath.takeIf { it.isNotBlank() }
+                                    ?: item.folderPath.takeIf { it.isNotBlank() },
+                                isFolder = false,
+                                accountId = accId,
+                                isEncrypted = item.isEncrypted,
+                                originalMetadataAvailable = true
+                            )
+                        }.filter { it.isImage || it.isVideo || it.isAudio }
+                    },
+                    onFailure = {
+                        // Offline fallback: gather cached media in local DB for this account
+                        runCatching {
+                            db.cloudFileDao().getFilesForAccount(accId)
+                                .map { it.toCloudFile() }
+                                .filter { !it.isFolderItem && (it.isImage || it.isVideo || it.isAudio) }
+                        }.getOrDefault(emptyList())
+                    }
+                )
+                FileRepository.cacheFiles(mappedMedia)
+                lastRecursiveMediaScope = scopeKey
+                _recursiveMediaFiles.value = mappedMedia
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("FilesViewModel", "Recursive media scan failed: ${e.message}")
+            } finally {
+                _isLoadingRecursiveMedia.value = false
+            }
+        }
+    }
+
     fun selectQuickFilter(filter: FileQuickFilter) {
         _quickFilter.value = filter
+        if (filter.isRecursiveMediaFilter) {
+            loadRecursiveMedia(filter, force = false)
+            if (_searchQuery.value.isBlank()) {
+                _globalSearchResults.value = emptyList()
+            }
+            return
+        }
+        recursiveMediaJob?.cancel()
+        _recursiveMediaFiles.value = emptyList()
+        _isLoadingRecursiveMedia.value = false
+        lastRecursiveMediaScope = null
+
         if (filter == FileQuickFilter.OFFLINE) {
             viewModelScope.launch(Dispatchers.IO) {
                 val accId = currentAccountId.value
@@ -593,18 +707,26 @@ class FilesViewModel(
             currentAccountId.value = accountId
             currentFolderId.value = null
             _breadcrumbs.value = listOf(BreadcrumbItem(null, "Files"))
+            lastRecursiveMediaScope = null
             prefs.edit().putString("last_active_account_id", accountId).apply()
             viewModelScope.launch {
                 UserPreferences.setActiveAndHomeAccountId(getApplication(), accountId)
             }
             refresh(force = false)
+            if (_quickFilter.value.isRecursiveMediaFilter) {
+                loadRecursiveMedia(_quickFilter.value, force = true)
+            }
         }
     }
 
     fun enterFolder(folderId: String, folderName: String) {
         currentFolderId.value = folderId
         _breadcrumbs.value = _breadcrumbs.value + BreadcrumbItem(folderId, folderName)
+        lastRecursiveMediaScope = null
         refresh(force = false)
+        if (_quickFilter.value.isRecursiveMediaFilter) {
+            loadRecursiveMedia(_quickFilter.value, force = true)
+        }
     }
 
     fun navigateBack(): Boolean {
@@ -613,7 +735,11 @@ class FilesViewModel(
             val updated = currentCrumbs.dropLast(1)
             _breadcrumbs.value = updated
             currentFolderId.value = updated.last().id
+            lastRecursiveMediaScope = null
             refresh(force = false)
+            if (_quickFilter.value.isRecursiveMediaFilter) {
+                loadRecursiveMedia(_quickFilter.value, force = true)
+            }
             return true
         }
         return false
@@ -625,11 +751,18 @@ class FilesViewModel(
             val updated = currentCrumbs.take(index + 1)
             _breadcrumbs.value = updated
             currentFolderId.value = updated.last().id
+            lastRecursiveMediaScope = null
             refresh(force = false)
+            if (_quickFilter.value.isRecursiveMediaFilter) {
+                loadRecursiveMedia(_quickFilter.value, force = true)
+            }
         }
     }
 
     fun refresh(force: Boolean = false) {
+        if (force && _quickFilter.value.isRecursiveMediaFilter) {
+            loadRecursiveMedia(_quickFilter.value, force = true)
+        }
         val accId = currentAccountId.value
             ?: accounts.value.firstOrNull { it.isDefault == true }?.effectiveId
             ?: accounts.value.firstOrNull()?.effectiveId
@@ -1166,20 +1299,23 @@ fun FilesScreen(
         }
     }
 
-    BackHandler(enabled = isSelectionMode || breadcrumbs.size > 1) {
-        if (isSelectionMode) {
-            selectedFileIds = emptySet()
-        } else if (breadcrumbs.size > 1) {
-            viewModel.navigateBack()
-        }
-    }
-
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val quickFilter by viewModel.quickFilter.collectAsStateWithLifecycle()
+    val isLoadingRecursiveMedia by viewModel.isLoadingRecursiveMedia.collectAsStateWithLifecycle()
     val downloadedOfflineIds by OfflineFileManager.downloadedFiles.collectAsStateWithLifecycle()
     val activeOfflineDownloads by OfflineFileManager.activeDownloads.collectAsStateWithLifecycle()
     val searchFocusTrigger by viewModel.searchFocusTrigger.collectAsStateWithLifecycle()
     val searchFocusRequester = remember { FocusRequester() }
+
+    BackHandler(enabled = isSelectionMode || quickFilter != FileQuickFilter.ALL || breadcrumbs.size > 1) {
+        if (isSelectionMode) {
+            selectedFileIds = emptySet()
+        } else if (quickFilter != FileQuickFilter.ALL) {
+            viewModel.selectQuickFilter(FileQuickFilter.ALL)
+        } else if (breadcrumbs.size > 1) {
+            viewModel.navigateBack()
+        }
+    }
     LaunchedEffect(Unit) {
         OfflineFileManager.init(context)
     }
@@ -2162,6 +2298,147 @@ fun FilesScreen(
                                 AppLoadingIndicator(
                                     color = MaterialTheme.colorScheme.primary,
                                     size = 48.dp
+                                )
+                            }
+                        }
+                    }
+                } else if (quickFilter.isGalleryFilter) {
+                    val galleryGridState = rememberLazyGridState()
+                    val scopeName = pane.breadcrumbs.lastOrNull()?.name
+                        ?.takeIf { pane.folderId != null }
+                        ?: activeAccount?.effectiveName
+                        ?: "Cloud Drive"
+
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 112.dp),
+                        state = galleryGridState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("files_media_gallery_grid"),
+                        contentPadding = PaddingValues(
+                            start = 8.dp,
+                            end = 8.dp,
+                            top = if (isCompactDensity) 4.dp else 8.dp,
+                            bottom = LocalBottomBarInset.current + 128.dp
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        item(span = { GridItemSpan(maxLineSpan) }, key = "gallery_breadcrumb_header") {
+                            Box(modifier = Modifier.padding(horizontal = 8.dp)) {
+                                if (pane.folderId != null || pane.breadcrumbs.size > 1) {
+                                    SubfolderScrollableHeader(
+                                        folderName = pane.breadcrumbs.lastOrNull()?.name ?: "Folder",
+                                        breadcrumbs = pane.breadcrumbs,
+                                        driveName = activeAccount?.effectiveName ?: "Cloud Drive",
+                                        searchQuery = searchQuery,
+                                        onSearchQueryChange = viewModel::updateSearchQuery,
+                                        hasActiveFilter = true,
+                                        activeFilterLabel = quickFilter.label,
+                                        onClearFilter = { viewModel.selectQuickFilter(FileQuickFilter.ALL) },
+                                        onOpenFilterSheet = { showSortDropdown = true },
+                                        isGridView = isGridView,
+                                        onToggleViewMode = {
+                                            coroutineScope.launch {
+                                                UserPreferences.setViewMode(
+                                                    context,
+                                                    if (isGridView) ViewMode.LIST else ViewMode.GRID
+                                                )
+                                            }
+                                        },
+                                        onBack = {
+                                            navDirection = FilesNavDirection.BACKWARD
+                                            viewModel.navigateBack()
+                                        },
+                                        onBreadcrumbClick = { idx ->
+                                            navDirection = FilesNavDirection.BACKWARD
+                                            viewModel.navigateToBreadcrumb(idx)
+                                        },
+                                        onNewFolder = { showCreateFolderDialog = true },
+                                        onUploadFiles = { filePickerLauncher.launch(arrayOf("*/*")) },
+                                        onRefresh = { viewModel.refresh(force = true) },
+                                        onSelectAll = {
+                                            selectedFileIds = pane.regularFiles.map { it.effectiveId }.toSet()
+                                        }
+                                    )
+                                } else {
+                                    DriveAndBreadcrumbRow(
+                                        driveName = activeAccount?.effectiveName ?: "Cloud Drive",
+                                        breadcrumbs = pane.breadcrumbs,
+                                        activeFilterLabel = quickFilter.label,
+                                        onClearFilter = { viewModel.selectQuickFilter(FileQuickFilter.ALL) },
+                                        hasActiveFilter = true,
+                                        onOpenFilterSheet = { showSortDropdown = true },
+                                        isGridView = isGridView,
+                                        onToggleViewMode = {
+                                            coroutineScope.launch {
+                                                UserPreferences.setViewMode(
+                                                    context,
+                                                    if (isGridView) ViewMode.LIST else ViewMode.GRID
+                                                )
+                                            }
+                                        },
+                                        onBreadcrumbClick = { idx ->
+                                            navDirection = FilesNavDirection.BACKWARD
+                                            viewModel.navigateToBreadcrumb(idx)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        item(span = { GridItemSpan(maxLineSpan) }, key = "gallery_scope_bar") {
+                            MediaGalleryScopeBar(
+                                activeFilter = quickFilter,
+                                scopeName = scopeName,
+                                itemCount = pane.regularFiles.size,
+                                isLoading = isLoadingRecursiveMedia,
+                                onSelectFilter = viewModel::selectQuickFilter,
+                                onExitGallery = { viewModel.selectQuickFilter(FileQuickFilter.ALL) },
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                            )
+                        }
+
+                        if (effectiveOffline && pane.regularFiles.isNotEmpty()) {
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "gallery_offline_banner") {
+                                OfflineBanner()
+                            }
+                        }
+
+                        if (pane.regularFiles.isNotEmpty()) {
+                            items(
+                                items = pane.regularFiles,
+                                key = { it.effectiveId.ifEmpty { "gallery_${it.effectiveName}" } }
+                            ) { mediaFile ->
+                                val tileAccId = mediaFile.effectiveAccountId.ifBlank { effectiveAccountId }
+                                MediaGalleryTile(
+                                    file = mediaFile,
+                                    accountId = tileAccId,
+                                    isSelected = selectedFileIds.contains(mediaFile.effectiveId),
+                                    isSelectionMode = isSelectionMode,
+                                    isOfflinePinned = mediaFile.effectiveId in downloadedOfflineIds,
+                                    onClick = {
+                                        if (isSelectionMode) {
+                                            toggleSelection(mediaFile.effectiveId)
+                                        } else {
+                                            openFileInViewer(
+                                                mediaFile,
+                                                tileAccId,
+                                                rootNavController,
+                                                pane.regularFiles
+                                            )
+                                        }
+                                    },
+                                    onLongClick = { toggleSelection(mediaFile.effectiveId) },
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
+                        } else if (!isLoadingRecursiveMedia && !pane.busy) {
+                            item(span = { GridItemSpan(maxLineSpan) }, key = "gallery_empty_state") {
+                                FilesEmptyState(
+                                    isSearch = true,
+                                    onCreateFolder = { showCreateFolderDialog = true },
+                                    onUploadFile = { filePickerLauncher.launch(arrayOf("*/*")) }
                                 )
                             }
                         }
