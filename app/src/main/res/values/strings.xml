@@ -359,4 +359,40 @@
     <string name="status_offline">Offline</string>
     <string name="status_captive_portal">Network sign-in required</string>
     <string name="status_back_online">Back online</string>
+
+    <!-- Whole-Drive Copy / Move / Download -->
+    <string name="drive_action_copy">Copy drive to…</string>
+    <string name="drive_action_move">Move drive to…</string>
+    <string name="drive_action_download">Download entire drive</string>
+    <string name="folder_action_download">Download folder</string>
+    <string name="folder_action_transfer_drive">Copy / Move folder to drive…</string>
+    <string name="drive_transfer_dialog_copy_title">Copy Drive</string>
+    <string name="drive_transfer_dialog_move_title">Move Drive</string>
+    <string name="drive_transfer_mode_copy">Copy</string>
+    <string name="drive_transfer_mode_move">Move</string>
+    <string name="drive_transfer_target_label">Destination drive</string>
+    <string name="drive_transfer_target_folder_label">Destination folder path (optional)</string>
+    <string name="drive_transfer_target_folder_placeholder">root (top level)</string>
+    <string name="drive_transfer_conflict_label">If file already exists</string>
+    <string name="drive_transfer_conflict_skip">Skip</string>
+    <string name="drive_transfer_conflict_rename">Rename</string>
+    <string name="drive_transfer_conflict_overwrite">Overwrite</string>
+    <string name="drive_transfer_move_safety_note">Source files are deleted only after each file is verified on the destination drive. Skipped or failed files stay untouched.</string>
+    <string name="drive_transfer_start_copy">Start Copy</string>
+    <string name="drive_transfer_start_move">Start Move</string>
+    <string name="drive_download_title">Download Drive</string>
+    <string name="drive_download_folder_title">Download Folder</string>
+    <string name="drive_download_scanning">Scanning folders and files…</string>
+    <string name="drive_download_confirm_format">Download %1$d files</string>
+    <string name="drive_download_empty">No downloadable files were found.</string>
+    <string name="drive_download_truncated_warning">Showing first %1$d files (maximum limit reached).</string>
+    <string name="transfers_section_server_jobs">Server drive jobs</string>
+    <string name="transfers_section_device_queue">Device transfers</string>
+    <string name="transfers_view_action">View</string>
+
+    <!-- Per-Folder Backup Target Drive -->
+    <string name="settings_backup_default_drive_title">Default backup drive</string>
+    <string name="settings_backup_folder_drive_dialog_title">Backup drive for %1$s</string>
+    <string name="settings_backup_use_default_drive_format">Use default (%1$s)</string>
+    <string name="settings_backup_folder_drive_default_chip">Default · %1$s</string>
 </resources>

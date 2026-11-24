@@ -233,6 +233,9 @@ class BackupWorker(
 
                 val targetAccountId = source.targetAccountId?.takeIf { it.isNotBlank() }
                     ?: prefs.backupAccountId?.takeIf { it.isNotBlank() }
+                    ?: db.accountDao().getAllAccounts().let { accs ->
+                        accs.firstOrNull { it.isDefault }?.id ?: accs.firstOrNull()?.id
+                    }
                 if (targetAccountId == null) {
                     failedSourcesCount++
                     val errText = "No target Cloud Drive selected."

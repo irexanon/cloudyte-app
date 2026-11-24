@@ -180,6 +180,18 @@ interface CloudyteApi {
         @Query("async") async: Boolean = true
     ): Response<TransferActionResponse>
 
+    @GET("/api/accounts/{accountId}/manifest")
+    suspend fun getAccountManifest(
+        @Path("accountId") accountId: String,
+        @Query("folderId") folderId: String? = null,
+        @Query("maxFiles") maxFiles: Int? = null
+    ): Response<DriveManifestResponse>
+
+    @POST("/api/transfers/drive")
+    suspend fun startDriveTransfer(
+        @Body request: DriveTransferRequest
+    ): Response<TransferActionResponse>
+
     @GET("/api/jobs")
     suspend fun getJobs(
         @Query("status") status: String? = null

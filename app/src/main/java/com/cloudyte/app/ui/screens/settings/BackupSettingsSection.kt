@@ -3,6 +3,7 @@ package com.cloudyte.app.ui.screens.settings
 import android.text.format.DateFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,8 +12,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.AutoMode
 import androidx.compose.material.icons.outlined.BatteryChargingFull
 import androidx.compose.material.icons.outlined.CloudUpload
@@ -51,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -101,6 +106,7 @@ fun BackupSettingsSection(
     var pendingPreset by remember { mutableStateOf(BackupPresetType.CUSTOM) }
     var pendingRegrantId by remember { mutableStateOf<String?>(null) }
     var sourcePendingDelete by remember { mutableStateOf<BackupSourceEntity?>(null) }
+    var sourceForDrivePicker by remember { mutableStateOf<BackupSourceEntity?>(null) }
     var showTargetDriveDialog by remember { mutableStateOf(false) }
     var showIntervalDialog by remember { mutableStateOf(false) }
     var showMaxSizeDialog by remember { mutableStateOf(false) }
@@ -143,7 +149,7 @@ fun BackupSettingsSection(
                 context = context,
                 treeUri = uri,
                 presetType = preset,
-                targetAccountId = prefsState.backupAccountId,
+                targetAccountId = null,
                 db = db
             )
             result.onSuccess { added ->
@@ -290,11 +296,17 @@ fun BackupSettingsSection(
                 }
             )
         }
+        val customDriveCount = sources.count { !it.targetAccountId.isNullOrBlank() }
+        val defaultDriveRowSubtitle = if (customDriveCount > 0) {
+            "$selectedDriveName • $customDriveCount folder(s) use a custom drive"
+        } else {
+            selectedDriveName
+        }
         add(
             GroupedListItem(key = "target_drive") {
                 SettingsClickRow(
-                    title = stringResource(R.string.settings_backup_target_drive),
-                    subtitle = selectedDriveName,
+                    title = stringResource(R.string.settings_backup_default_drive_title),
+                    subtitle = defaultDriveRowSubtitle,
                     icon = Icons.Outlined.CloudUpload,
                     onClick = { showTargetDriveDialog = true },
                     modifier = Modifier.testTag("backup_target_drive_row")
@@ -444,81 +456,98 @@ fun BackupSettingsSection(
 
             add(
                 GroupedListItem(key = "std_${preset.name}") {
-                    SettingsSwitchRow(
-                        title = preset.label,
-                        subtitle = sub,
-                        icon = Icons.Outlined.FolderOpen,
-                        checked = isChecked,
-                        onChange = { wantEnable ->
-                            when {
-                                linkedSource == null -> {
-                                    val parentGrant = BackupSourceManager.findParentTreeGrantForRelativePath(
-                                        context,
-                                        preset.relativePath
-                                    )
-                                    if (parentGrant != null) {
-                                        val derivedUri = BackupSourceManager.buildSubfolderTreeUri(
-                                            parentGrant.first,
-                                            parentGrant.second
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        SettingsSwitchRow(
+                            title = preset.label,
+                            subtitle = sub,
+                            icon = Icons.Outlined.FolderOpen,
+                            checked = isChecked,
+                            onChange = { wantEnable ->
+                                when {
+                                    linkedSource == null -> {
+                                        val parentGrant = BackupSourceManager.findParentTreeGrantForRelativePath(
+                                            context,
+                                            preset.relativePath
                                         )
-                                        scope.launch {
-                                            val result = BackupSourceManager.persistAndAddSource(
-                                                context = context,
-                                                treeUri = derivedUri,
-                                                presetType = preset,
-                                                targetAccountId = prefsState.backupAccountId,
-                                                db = db
+                                        if (parentGrant != null) {
+                                            val derivedUri = BackupSourceManager.buildSubfolderTreeUri(
+                                                parentGrant.first,
+                                                parentGrant.second
                                             )
-                                            result.onSuccess { added ->
-                                                snackbarHostState.showSnackbar("Enabled '${added.displayName}' using existing folder grant.")
-                                            }.onFailure {
-                                                pendingPreset = preset
-                                                addFolderLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                            scope.launch {
+                                                val result = BackupSourceManager.persistAndAddSource(
+                                                    context = context,
+                                                    treeUri = derivedUri,
+                                                    presetType = preset,
+                                                    targetAccountId = null,
+                                                    db = db
+                                                )
+                                                result.onSuccess { added ->
+                                                    snackbarHostState.showSnackbar("Enabled '${added.displayName}' using existing folder grant.")
+                                                }.onFailure {
+                                                    pendingPreset = preset
+                                                    addFolderLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                                }
                                             }
+                                        } else {
+                                            pendingPreset = preset
+                                            addFolderLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
                                         }
-                                    } else {
-                                        pendingPreset = preset
-                                        addFolderLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
                                     }
-                                }
-                                wantEnable && !isHealthy -> {
-                                    val parentGrant = BackupSourceManager.findParentTreeGrantForRelativePath(
-                                        context,
-                                        preset.relativePath
-                                    )
-                                    if (parentGrant != null) {
-                                        val derivedUri = BackupSourceManager.buildSubfolderTreeUri(
-                                            parentGrant.first,
-                                            parentGrant.second
+                                    wantEnable && !isHealthy -> {
+                                        val parentGrant = BackupSourceManager.findParentTreeGrantForRelativePath(
+                                            context,
+                                            preset.relativePath
                                         )
-                                        scope.launch {
-                                            val result = BackupSourceManager.regrantSource(
-                                                context = context,
-                                                sourceId = linkedSource.id,
-                                                grantedTreeUri = derivedUri,
-                                                db = db
+                                        if (parentGrant != null) {
+                                            val derivedUri = BackupSourceManager.buildSubfolderTreeUri(
+                                                parentGrant.first,
+                                                parentGrant.second
                                             )
-                                            result.onSuccess { restored ->
-                                                snackbarHostState.showSnackbar("Restored '${restored.displayName}' using existing folder grant.")
-                                            }.onFailure {
-                                                pendingRegrantId = linkedSource.id
-                                                regrantLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                            scope.launch {
+                                                val result = BackupSourceManager.regrantSource(
+                                                    context = context,
+                                                    sourceId = linkedSource.id,
+                                                    grantedTreeUri = derivedUri,
+                                                    db = db
+                                                )
+                                                result.onSuccess { restored ->
+                                                    snackbarHostState.showSnackbar("Restored '${restored.displayName}' using existing folder grant.")
+                                                }.onFailure {
+                                                    pendingRegrantId = linkedSource.id
+                                                    regrantLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                                }
                                             }
+                                        } else {
+                                            pendingRegrantId = linkedSource.id
+                                            regrantLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
                                         }
-                                    } else {
-                                        pendingRegrantId = linkedSource.id
-                                        regrantLauncher.launch(BackupSourceManager.suggestedInitialUri(preset))
+                                    }
+                                    else -> {
+                                        scope.launch {
+                                            BackupSourceManager.setSourceEnabled(context, linkedSource.id, wantEnable, db)
+                                        }
                                     }
                                 }
-                                else -> {
-                                    scope.launch {
-                                        BackupSourceManager.setSourceEnabled(context, linkedSource.id, wantEnable, db)
-                                    }
-                                }
+                            },
+                            modifier = Modifier.testTag("backup_preset_${preset.name.lowercase()}")
+                        )
+
+                        if (linkedSource != null && accounts.isNotEmpty()) {
+                            val overrideAcc = linkedSource.targetAccountId?.let { id ->
+                                accounts.firstOrNull { it.effectiveId == id }
                             }
-                        },
-                        modifier = Modifier.testTag("backup_preset_${preset.name.lowercase()}")
-                    )
+                            FolderTargetDriveChip(
+                                driveLabel = overrideAcc?.effectiveName
+                                    ?: stringResource(R.string.settings_backup_folder_drive_default_chip, selectedDriveName),
+                                isCustomDrive = overrideAcc != null,
+                                onClick = { sourceForDrivePicker = linkedSource },
+                                modifier = Modifier
+                                    .padding(start = 56.dp, end = 16.dp, bottom = 12.dp)
+                                    .testTag("backup_preset_drive_${preset.name.lowercase()}")
+                            )
+                        }
+                    }
                 }
             )
         }
@@ -527,6 +556,9 @@ fun BackupSettingsSection(
             val permStatus = runCatching { BackupSourcePermissionStatus.valueOf(source.permissionStatus) }
                 .getOrDefault(BackupSourcePermissionStatus.UNKNOWN)
             val isHealthy = permStatus == BackupSourcePermissionStatus.GRANTED
+            val overrideAcc = source.targetAccountId?.let { id ->
+                accounts.firstOrNull { it.effectiveId == id }
+            }
             val sub = when {
                 !isHealthy -> source.lastError ?: "Permission revoked · Tap to re-grant or remove"
                 source.lastScanAt > 0L ->
@@ -535,10 +567,7 @@ fun BackupSettingsSection(
             }
             add(
                 GroupedListItem(key = "custom_${source.id}") {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
                         SettingsClickRow(
                             title = source.displayName,
                             subtitle = sub,
@@ -560,12 +589,25 @@ fun BackupSettingsSection(
                                 if (!isHealthy) {
                                     pendingRegrantId = source.id
                                     regrantLauncher.launch(null)
-                                } else {
-                                    sourcePendingDelete = source
+                                } else if (accounts.isNotEmpty()) {
+                                    sourceForDrivePicker = source
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("backup_custom_source_${source.id}")
                         )
+                        if (accounts.isNotEmpty()) {
+                            FolderTargetDriveChip(
+                                driveLabel = overrideAcc?.effectiveName
+                                    ?: stringResource(R.string.settings_backup_folder_drive_default_chip, selectedDriveName),
+                                isCustomDrive = overrideAcc != null,
+                                onClick = { sourceForDrivePicker = source },
+                                modifier = Modifier
+                                    .padding(start = 56.dp, end = 16.dp, bottom = 12.dp)
+                                    .testTag("backup_custom_drive_${source.id}")
+                            )
+                        }
                     }
                 }
             )
@@ -661,6 +703,46 @@ fun BackupSettingsSection(
         )
     }
 
+    sourceForDrivePicker?.let { source ->
+        val defaultOptionLabel = stringResource(R.string.settings_backup_use_default_drive_format, selectedDriveName)
+        val options = listOf(defaultOptionLabel) + accounts.map { "${it.effectiveName} (${it.effectiveType})" }
+        val selectedIdx = if (source.targetAccountId.isNullOrBlank()) {
+            0
+        } else {
+            val accIdx = accounts.indexOfFirst { it.effectiveId == source.targetAccountId }
+            if (accIdx >= 0) accIdx + 1 else 0
+        }
+        ChoiceDialog(
+            title = stringResource(R.string.settings_backup_folder_drive_dialog_title, source.displayName),
+            options = options,
+            selectedIndex = selectedIdx,
+            onSelect = { idx ->
+                scope.launch {
+                    if (idx == 0) {
+                        BackupSourceManager.setSourceTargetAccount(
+                            context = context,
+                            sourceId = source.id,
+                            targetAccountId = null,
+                            db = db
+                        )
+                        snackbarHostState.showSnackbar("'${source.displayName}' will back up to default drive ($selectedDriveName).")
+                    } else {
+                        val chosen = accounts.getOrNull(idx - 1) ?: return@launch
+                        BackupSourceManager.setSourceTargetAccount(
+                            context = context,
+                            sourceId = source.id,
+                            targetAccountId = chosen.effectiveId,
+                            targetDriveLabel = chosen.effectiveName,
+                            db = db
+                        )
+                        snackbarHostState.showSnackbar("'${source.displayName}' will back up to '${chosen.effectiveName}'.")
+                    }
+                }
+            },
+            onDismiss = { sourceForDrivePicker = null }
+        )
+    }
+
     if (showConfirmDeleteLocal) {
         ConfirmDialog(
             title = stringResource(R.string.settings_delete_after_upload_confirm_title),
@@ -671,5 +753,57 @@ fun BackupSettingsSection(
             },
             onDismiss = { showConfirmDeleteLocal = false }
         )
+    }
+}
+
+@Composable
+private fun FolderTargetDriveChip(
+    driveLabel: String,
+    isCustomDrive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (isCustomDrive) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        border = if (isCustomDrive) {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
+        } else {
+            null
+        },
+        onClick = onClick,
+        modifier = modifier.heightIn(min = 48.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.CloudUpload,
+                contentDescription = null,
+                tint = if (isCustomDrive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = driveLabel,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (isCustomDrive) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (isCustomDrive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            Icon(
+                imageVector = Icons.Outlined.ArrowDropDown,
+                contentDescription = "Choose backup drive",
+                tint = if (isCustomDrive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }

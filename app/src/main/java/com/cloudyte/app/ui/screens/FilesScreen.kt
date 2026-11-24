@@ -174,7 +174,9 @@ import com.cloudyte.app.api.OfflineFileManager
 import com.cloudyte.app.features.player.GDriveInfoBottomSheet
 import com.cloudyte.app.features.player.performShareFileLink
 import com.cloudyte.app.ui.components.AppLoadingIndicator
+import com.cloudyte.app.ui.components.DriveCopyMoveDialog
 import com.cloudyte.app.ui.components.DriveItemActionSheet
+import com.cloudyte.app.ui.components.DriveManifestDownloadDialog
 import com.cloudyte.app.ui.components.FileQuickFilter
 import com.cloudyte.app.ui.components.FilesFilterSortSheet
 import com.cloudyte.app.ui.components.FileThumb
@@ -1198,6 +1200,8 @@ fun FilesScreen(
     var singleMoveCopyTarget by remember { mutableStateOf<Pair<CloudFile, Boolean>?>(null) }
     var fileForActionSheet by remember { mutableStateOf<CloudFile?>(null) }
     var fileForQuickInfo by remember { mutableStateOf<CloudFile?>(null) }
+    var folderForDownload by remember { mutableStateOf<Pair<String, CloudFile>?>(null) }
+    var folderForDriveTransfer by remember { mutableStateOf<Pair<Account, CloudFile>?>(null) }
 
     val sortOrder = remember(prefsState.sortField, prefsState.sortDirection) {
         when {
@@ -1637,7 +1641,47 @@ fun FilesScreen(
             onOpenFullDetails = {
                 rootNavController.navigate("file_detail/$resolvedSheetAcc/${sheetFile.effectiveId}")
             },
+            onDownloadFolder = if (sheetFile.isFolderItem && resolvedSheetAcc.isNotBlank() && resolvedSheetAcc != "all" && resolvedSheetAcc != "root") {
+                { folderForDownload = resolvedSheetAcc to sheetFile }
+            } else null,
+            onTransferFolderToDrive = if (sheetFile.isFolderItem) {
+                val srcAcc = accounts.find { it.effectiveId == resolvedSheetAcc } ?: activeAccount
+                if (srcAcc != null) {
+                    { folderForDriveTransfer = srcAcc to sheetFile }
+                } else null
+            } else null,
             onDelete = { fileForDelete = sheetFile }
+        )
+    }
+
+    folderForDownload?.let { (accId, folderItem) ->
+        val accName = accounts.find { it.effectiveId == accId }?.effectiveName ?: "Drive"
+        DriveManifestDownloadDialog(
+            accountId = accId,
+            driveName = accName,
+            folderId = folderItem.effectiveId,
+            folderName = folderItem.effectiveName,
+            onDismiss = { folderForDownload = null },
+            onQueued = { count, destFolder ->
+                folderForDownload = null
+                snackbarMessage = "Queued $count file(s) to downloads/$destFolder"
+            }
+        )
+    }
+
+    folderForDriveTransfer?.let { (sourceAcc, folderItem) ->
+        DriveCopyMoveDialog(
+            sourceAccount = sourceAcc,
+            allAccounts = accounts,
+            initialIsMove = false,
+            sourceFolderId = folderItem.effectiveId,
+            sourceFolderName = folderItem.effectiveName,
+            onDismiss = { folderForDriveTransfer = null },
+            onStarted = { _, isMoveAction, targetName ->
+                folderForDriveTransfer = null
+                val verb = if (isMoveAction) "Move" else "Copy"
+                snackbarMessage = "$verb started: ${folderItem.effectiveName} → $targetName (track in Transfers)"
+            }
         )
     }
 

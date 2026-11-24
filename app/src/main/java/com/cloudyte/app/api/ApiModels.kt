@@ -455,18 +455,106 @@ data class TransferActionResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class JobEndpointRef(
+    val accountId: String? = null,
+    val fileId: String? = null,
+    val folderId: String? = null,
+    val driveName: String? = null
+)
+
+@JsonClass(generateAdapter = true)
 data class JobStatusResponse(
     val id: String = "",
+    val jobId: String? = null,
+    val accountId: String? = null,
     val type: String? = null,
     val status: String = "",
     val stage: String? = null,
+    val progress: Int? = null,
     val progressPct: Int? = null,
     val bytesProcessed: Long? = null,
     val totalBytes: Long? = null,
+    val itemsProcessed: Int? = null,
+    val totalItems: Int? = null,
+    val source: JobEndpointRef? = null,
+    val destination: JobEndpointRef? = null,
+    val isMove: Boolean? = null,
     val attempts: Int? = null,
     val maxAttempts: Int? = null,
     val deadLettered: Boolean? = null,
-    val lastError: String? = null
+    val error: String? = null,
+    val lastError: String? = null,
+    val createdAt: String? = null,
+    val startedAt: String? = null,
+    val completedAt: String? = null
+) {
+    val effectiveId: String
+        get() = jobId?.takeIf { it.isNotBlank() } ?: id
+
+    val effectiveProgressPct: Int
+        get() = (progressPct ?: progress ?: run {
+            val total = totalBytes ?: 0L
+            val processed = bytesProcessed ?: 0L
+            if (total > 0L) ((processed * 100L) / total).toInt()
+            else {
+                val ti = totalItems ?: 0
+                val ip = itemsProcessed ?: 0
+                if (ti > 0) ((ip * 100) / ti) else 0
+            }
+        }).coerceIn(0, 100)
+
+    val effectiveError: String?
+        get() = error?.takeIf { it.isNotBlank() } ?: lastError?.takeIf { it.isNotBlank() }
+
+    val normalizedStatus: String
+        get() = status.lowercase()
+
+    val isActiveStatus: Boolean
+        get() = normalizedStatus in setOf("queued", "running", "retrying", "pending")
+
+    val isCompletedStatus: Boolean
+        get() = normalizedStatus == "completed"
+
+    val isFailedOrCancelledStatus: Boolean
+        get() = normalizedStatus in setOf("failed", "cancelled", "completed_with_errors", "dead_letter")
+}
+
+@JsonClass(generateAdapter = true)
+data class DriveManifestFile(
+    val id: String = "",
+    val name: String = "",
+    val folderPath: String = "",
+    val relativePath: String = "",
+    val sizeBytes: Long = 0L,
+    val mimeType: String? = null,
+    val updatedAt: String? = null,
+    val isEncrypted: Boolean = false,
+    val isNote: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class DriveManifestResponse(
+    val accountId: String = "",
+    val accountType: String = "",
+    val driveName: String = "",
+    val rootFolderId: String = "root",
+    val generatedAt: String? = null,
+    val truncated: Boolean = false,
+    val totalFolders: Int = 0,
+    val totalFiles: Int = 0,
+    val totalBytes: Long = 0L,
+    val folders: List<String> = emptyList(),
+    val files: List<DriveManifestFile> = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class DriveTransferRequest(
+    val sourceAccountId: String,
+    val targetAccountId: String,
+    val sourceFolderId: String = "root",
+    val targetFolderId: String = "root",
+    val isMove: Boolean = false,
+    val conflictStrategy: String = "skip"
 )
 
 @JsonClass(generateAdapter = true)

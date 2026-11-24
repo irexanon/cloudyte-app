@@ -363,6 +363,8 @@ fun DriveItemActionSheet(
     onOpenFullDetails: () -> Unit,
     onSendFileCopy: (() -> Unit)? = null,
     onOpenWithExternal: (() -> Unit)? = null,
+    onDownloadFolder: (() -> Unit)? = null,
+    onTransferFolderToDrive: (() -> Unit)? = null,
     onDelete: () -> Unit
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -549,6 +551,23 @@ fun DriveItemActionSheet(
                     title = "Download to device",
                     onClick = { onDismiss(); onDownload() }
                 )
+            } else {
+                if (onDownloadFolder != null) {
+                    SheetActionItem(
+                        icon = Icons.Default.Download,
+                        title = "Download folder",
+                        subtitle = "Resumable download preserving subfolders",
+                        onClick = { onDismiss(); onDownloadFolder() }
+                    )
+                }
+                if (onTransferFolderToDrive != null) {
+                    SheetActionItem(
+                        icon = Icons.Default.ContentCopy,
+                        title = "Copy / Move folder to drive…",
+                        subtitle = "Server-side folder transfer to another drive",
+                        onClick = { onDismiss(); onTransferFolderToDrive() }
+                    )
+                }
             }
 
             SheetActionItem(

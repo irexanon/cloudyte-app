@@ -39,11 +39,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.LinkOff
@@ -104,6 +107,8 @@ import com.cloudyte.app.data.UserPreferences
 import com.cloudyte.app.db.AppDatabase
 import com.cloudyte.app.db.LocalAccount
 import com.cloudyte.app.ui.components.AppLoadingIndicator
+import com.cloudyte.app.ui.components.DriveCopyMoveDialog
+import com.cloudyte.app.ui.components.DriveManifestDownloadDialog
 import com.cloudyte.app.ui.components.LocalBottomBarInset
 import com.cloudyte.app.ui.components.WavyProgressBar
 import com.cloudyte.app.ui.theme.MetricTextStyle
@@ -260,6 +265,8 @@ fun AccountsScreen(
     var accountForDisconnect by remember { mutableStateOf<Account?>(null) }
     var accountForRename by remember { mutableStateOf<Account?>(null) }
     var renameInput by remember { mutableStateOf("") }
+    var driveForCopyMove by remember { mutableStateOf<Pair<Account, Boolean>?>(null) }
+    var driveForDownload by remember { mutableStateOf<Account?>(null) }
 
     val listState = rememberLazyListState()
 
@@ -399,6 +406,50 @@ fun AccountsScreen(
             dismissButton = {
                 TextButton(onClick = { accountForRename = null }) {
                     Text(stringResource(R.string.action_cancel), color = ext.lightAccent)
+                }
+            }
+        )
+    }
+
+    driveForCopyMove?.let { (sourceAccount, initialIsMove) ->
+        DriveCopyMoveDialog(
+            sourceAccount = sourceAccount,
+            allAccounts = accounts,
+            initialIsMove = initialIsMove,
+            onDismiss = { driveForCopyMove = null },
+            onStarted = { _, isMoveAction, targetName ->
+                driveForCopyMove = null
+                coroutineScope.launch {
+                    val verb = if (isMoveAction) "Move" else "Copy"
+                    val res = snackbarHostState.showSnackbar(
+                        message = "$verb started: ${sourceAccount.effectiveName} → $targetName",
+                        actionLabel = "View",
+                        withDismissAction = true
+                    )
+                    if (res == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                        navController.navigateSingleTopRestore("transfers")
+                    }
+                }
+            }
+        )
+    }
+
+    driveForDownload?.let { targetDrive ->
+        DriveManifestDownloadDialog(
+            accountId = targetDrive.effectiveId,
+            driveName = targetDrive.effectiveName,
+            onDismiss = { driveForDownload = null },
+            onQueued = { count, destFolder ->
+                driveForDownload = null
+                coroutineScope.launch {
+                    val res = snackbarHostState.showSnackbar(
+                        message = "Queued $count file(s) to downloads/$destFolder",
+                        actionLabel = "View",
+                        withDismissAction = true
+                    )
+                    if (res == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                        navController.navigateSingleTopRestore("transfers")
+                    }
                 }
             }
         )
@@ -665,6 +716,15 @@ fun AccountsScreen(
                                     AccountCard(
                                         account = account,
                                         shape = cardShape,
+                                        onCopyDrive = {
+                                            driveForCopyMove = account to false
+                                        },
+                                        onMoveDrive = {
+                                            driveForCopyMove = account to true
+                                        },
+                                        onDownloadDrive = {
+                                            driveForDownload = account
+                                        },
                                         onRename = {
                                             renameInput = account.effectiveName
                                             accountForRename = account
@@ -748,6 +808,9 @@ private fun isTelegramAccount(account: Account): Boolean =
 @Composable
 fun AccountCard(
     account: Account,
+    onCopyDrive: () -> Unit,
+    onMoveDrive: () -> Unit,
+    onDownloadDrive: () -> Unit,
     onRename: () -> Unit,
     onSetDefault: () -> Unit,
     onRefresh: () -> Unit,
@@ -886,6 +949,34 @@ fun AccountCard(
                         onDismissRequest = { menuExpanded = false },
                         modifier = Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.drive_action_copy), color = MaterialTheme.colorScheme.onSurface) },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = ext.lightAccent) },
+                            onClick = {
+                                menuExpanded = false
+                                onCopyDrive()
+                            },
+                            modifier = Modifier.testTag("account_menu_copy_drive_${account.effectiveId}")
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.drive_action_move), color = MaterialTheme.colorScheme.onSurface) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.DriveFileMove, contentDescription = null, tint = ext.lightAccent) },
+                            onClick = {
+                                menuExpanded = false
+                                onMoveDrive()
+                            },
+                            modifier = Modifier.testTag("account_menu_move_drive_${account.effectiveId}")
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.drive_action_download), color = MaterialTheme.colorScheme.onSurface) },
+                            leadingIcon = { Icon(Icons.Default.CloudDownload, contentDescription = null, tint = ext.mintSuccess) },
+                            onClick = {
+                                menuExpanded = false
+                                onDownloadDrive()
+                            },
+                            modifier = Modifier.testTag("account_menu_download_drive_${account.effectiveId}")
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.action_rename), color = MaterialTheme.colorScheme.onSurface) },
                             leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) },

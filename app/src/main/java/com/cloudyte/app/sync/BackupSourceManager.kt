@@ -439,6 +439,37 @@ object BackupSourceManager {
         if (reschedule) AutoSyncManager.requestReschedule(context)
     }
 
+    suspend fun setSourceTargetAccount(
+        context: Context,
+        sourceId: String,
+        targetAccountId: String?,
+        targetDriveLabel: String? = null,
+        db: AppDatabase = AppDatabase.getDatabase(context),
+        reschedule: Boolean = true
+    ) {
+        val dao = db.backupSourceDao()
+        val existing = dao.findById(sourceId) ?: return
+        val normalizedTarget = targetAccountId?.takeIf { it.isNotBlank() }
+        val driveChanged = existing.targetAccountId != normalizedTarget
+        dao.upsert(
+            existing.copy(
+                targetAccountId = normalizedTarget,
+                targetFolderId = if (driveChanged) null else existing.targetFolderId,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+        val destDesc = if (normalizedTarget == null) {
+            "default backup drive"
+        } else {
+            targetDriveLabel?.takeIf { it.isNotBlank() } ?: normalizedTarget
+        }
+        SyncLogger.log(
+            "Updated target drive for '${existing.displayName}' → $destDesc",
+            SyncLogLevel.INFO
+        )
+        if (reschedule) AutoSyncManager.onFolderOrAccountChanged(context)
+    }
+
     suspend fun removeSource(
         context: Context,
         sourceId: String,
