@@ -89,6 +89,7 @@ object AccountSessionHelper {
         runCatching {
             appContext.getSharedPreferences("cloudyte_audio_playback", Context.MODE_PRIVATE).edit().clear().apply()
         }
+        runCatching { DriveAliasStore.clearAll(appContext) }
         runCatching { SyncLogger.clearLogs() }
         runCatching { com.cloudyte.app.provider.CloudyteDocumentsProvider.notifyRootsChanged(appContext) }
 
@@ -182,6 +183,7 @@ object AccountSessionHelper {
                 drivePrefs.edit().remove("last_active_account_id").apply()
             }
         }
+        runCatching { DriveAliasStore.removeAlias(appContext, accountId) }
         runCatching { com.cloudyte.app.provider.CloudyteDocumentsProvider.notifyRootsChanged(appContext) }
     }
 }

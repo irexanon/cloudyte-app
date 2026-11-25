@@ -60,12 +60,20 @@ class FileDetailViewModel(application: Application) : AndroidViewModel(applicati
             }
             try {
                 val response = ApiClient.apiService.shareFile(ShareRequest(accountId, fileId))
-                _shareUrl.value = response.effectiveUrl.ifEmpty {
-                    "${ApiClient.API_BASE_URL}/api/download/$accountId/$fileId"
+                val resolvedUrl = response.effectiveUrl
+                if (resolvedUrl.isNotBlank()) {
+                    _shareUrl.value = resolvedUrl
+                } else {
+                    _shareError.value = response.error?.takeIf { it.isNotBlank() }
+                        ?: "Server did not return a public share link."
                 }
+            } catch (e: retrofit2.HttpException) {
+                Log.e("FileDetailViewModel", "Share HTTP error", e)
+                val rawErr = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
+                _shareError.value = ApiClient.parseError(rawErr, e.code())
             } catch (e: Exception) {
                 Log.e("FileDetailViewModel", "Share error", e)
-                _shareUrl.value = "${ApiClient.API_BASE_URL}/api/download/$accountId/$fileId"
+                _shareError.value = e.localizedMessage ?: "Failed to create public share link."
             }
         }
     }

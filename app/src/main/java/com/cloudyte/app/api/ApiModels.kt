@@ -29,15 +29,34 @@ data class LoginResponse(
 
 @JsonClass(generateAdapter = true)
 data class UserSettingsRequest(
-    val backupEnabled: Boolean,
-    val backupAccId: String?,
-    val isDefaultAccId: String?
+    val backupEnabled: Boolean? = null,
+    val backupAccId: String? = null,
+    val isDefaultAccId: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AccountRenameRequest(
+    val name: String,
+    val driveName: String = name
 )
 
 @JsonClass(generateAdapter = true)
 data class TgDriveRegisterRequest(
     val channelId: String,
     val driveName: String
+)
+
+@JsonClass(generateAdapter = true)
+data class TgDriveImportResponse(
+    val success: Boolean? = false,
+    val isForum: Boolean? = null,
+    val importedTopics: Int? = 0,
+    val updatedTopics: Int? = 0,
+    val importedFiles: Int? = 0,
+    val skippedDuplicates: Int? = 0,
+    val invalidCount: Int? = 0,
+    val totalFiles: Int? = 0,
+    val error: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -74,16 +93,55 @@ data class MoveCopyRequest(
 @JsonClass(generateAdapter = true)
 data class ShareRequest(
     val accountId: String,
-    val fileId: String
+    val fileId: String,
+    val expiresInHours: Int? = null,
+    val maxDownloads: Int? = null,
+    val pin: String? = null,
+    val allowDownload: Boolean? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class ShareResponse(
     val shareUrl: String? = null,
     val url: String? = null,
-    val success: Boolean? = null
+    val shareId: String? = null,
+    val expiresAt: String? = null,
+    val maxDownloads: Int? = null,
+    val hasPin: Boolean? = null,
+    val allowDownload: Boolean? = null,
+    val success: Boolean? = null,
+    val error: String? = null
 ) {
-    val effectiveUrl: String get() = shareUrl ?: url ?: ""
+    val effectiveUrl: String
+        get() = shareUrl?.takeIf { it.isNotBlank() }
+            ?: url?.takeIf { it.isNotBlank() }
+            ?: shareId?.takeIf { it.isNotBlank() }?.let { "${ApiClient.API_BASE_URL}/s/$it" }
+            ?: ""
+}
+
+@JsonClass(generateAdapter = true)
+data class ActiveShareDto(
+    val shareId: String? = null,
+    val id: String? = null,
+    val accountId: String? = null,
+    val fileId: String? = null,
+    val fileName: String? = null,
+    val shareUrl: String? = null,
+    val createdAt: String? = null,
+    val expiresAt: String? = null,
+    val maxDownloads: Int? = null,
+    val downloadCount: Int? = 0,
+    val hasPin: Boolean? = false,
+    val allowDownload: Boolean? = true
+) {
+    val effectiveShareId: String get() = shareId?.takeIf { it.isNotBlank() } ?: id.orEmpty()
+    val effectiveDownloadCount: Int get() = downloadCount ?: 0
+    val effectiveHasPin: Boolean get() = hasPin == true
+    val effectiveAllowDownload: Boolean get() = allowDownload != false
+    val effectiveShareUrl: String
+        get() = shareUrl?.takeIf { it.isNotBlank() }
+            ?: effectiveShareId.takeIf { it.isNotBlank() }?.let { "${ApiClient.API_BASE_URL}/s/$it" }
+            ?: ""
 }
 
 @JsonClass(generateAdapter = true)
@@ -120,12 +178,33 @@ data class Account(
     val percentage: Float? = null,
     val fileCount: Int? = null,
     val isDefault: Boolean? = false,
-    val channelId: String? = null
+    val channelId: String? = null,
+    val error: Any? = null,
+    val errorMessage: String? = null,
+    val errorCode: Any? = null,
+    val isForum: Boolean? = null,
+    val chatType: String? = null
 ) {
     val effectiveId: String get() = id ?: _id ?: ""
     val effectiveName: String get() = name ?: driveName ?: "Drive"
     val effectiveType: String get() = accountType ?: type ?: provider ?: "TG Drive"
-    
+    val errorAsString: String?
+        get() = when (val e = error) {
+            is Boolean -> if (e) "true" else null
+            is String -> e.takeIf { it.isNotBlank() && !it.equals("false", ignoreCase = true) }
+            else -> e?.toString()?.takeIf { it.isNotBlank() && !it.equals("false", ignoreCase = true) }
+        }
+    val errorCodeString: String?
+        get() = errorCode?.toString()?.takeIf { it.isNotBlank() }
+    val hasError: Boolean
+        get() = errorAsString != null || !errorMessage.isNullOrBlank() || !errorCodeString.isNullOrBlank()
+    val effectiveErrorMessage: String?
+        get() = errorMessage?.takeIf { it.isNotBlank() }
+            ?: errorAsString?.takeIf { !it.equals("true", ignoreCase = true) }
+            ?: errorCodeString
+            ?: if (hasError) "Connection expired — reconnect required" else null
+    val isForumGroup: Boolean get() = isForum == true
+
     val usageBytes: Long get() = parseBytes(usage)
     val totalBytes: Long get() = parseBytes(total)
     
@@ -226,8 +305,10 @@ data class CloudFile(
     val opaqueRemoteName: String? = null,
     val plaintextSizeBytes: Long? = null,
     val originalMetadataAvailable: Boolean = false,
-    val metadataStatus: String? = null
+    val metadataStatus: String? = null,
+    val isNote: Boolean? = false
 ) {
+    val isNoteItem: Boolean get() = isNote == true
     val effectiveId: String get() = id ?: _id ?: fileId ?: ""
     val effectiveName: String
         get() {
@@ -282,29 +363,37 @@ data class CloudFile(
         return if (rawType.isNotBlank()) rawType.lowercase(Locale.US) else "file"
     }
 
-    val isImage: Boolean get() = !isFolderItem && (!isEncrypted || originalMetadataAvailable) && (
+    val isImage: Boolean get() = !isFolderItem && !isNoteItem && (!isEncrypted || originalMetadataAvailable) && (
         allTypeCandidates.any {
             it in listOf("image", "photo", "jpg", "jpeg", "png", "webp", "gif", "bmp", "svg", "heic", "heif", "ico", "jfif", "avif") ||
                 it.startsWith("image/")
-        } || effectiveName.contains("IMG_", ignoreCase = true) || effectiveName.contains("Screenshot", ignoreCase = true)
+        } || (
+            fileExtension.isBlank() &&
+                (effectiveName.contains("IMG_", ignoreCase = true) || effectiveName.contains("Screenshot", ignoreCase = true))
+            )
     )
 
-    val isVideo: Boolean get() = !isFolderItem && (!isEncrypted || originalMetadataAvailable) && (
+    val isVideo: Boolean get() = !isFolderItem && !isNoteItem && (!isEncrypted || originalMetadataAvailable) && (
         allTypeCandidates.any {
             it in listOf("video", "mp4", "mkv", "avi", "mov", "flv", "wmv", "3gp", "webm", "m4v", "ts", "mpeg", "mpg") ||
                 it.startsWith("video/")
-        } || effectiveName.contains("VID_", ignoreCase = true)
+        } || (
+            fileExtension.isBlank() &&
+                effectiveName.contains("VID_", ignoreCase = true)
+            )
     )
 
-    val isAudio: Boolean get() = !isFolderItem && (!isEncrypted || originalMetadataAvailable) && allTypeCandidates.any {
+    val isAudio: Boolean get() = !isFolderItem && !isNoteItem && (!isEncrypted || originalMetadataAvailable) && allTypeCandidates.any {
         it in listOf("audio", "mp3", "wav", "ogg", "m4a", "flac", "aac", "opus", "wma") ||
             it.startsWith("audio/")
     }
 
-    val isTextOrCode: Boolean get() = !isFolderItem && (!isEncrypted || originalMetadataAvailable) && allTypeCandidates.any {
-        it in listOf("txt", "text", "json", "js", "ts", "py", "java", "kt", "c", "cpp", "h", "cs", "html", "css", "xml", "yml", "yaml", "sh", "sql", "log", "csv", "env", "md", "markdown", "properties", "gradle", "toml", "conf") ||
-            it.startsWith("text/") || it.contains("json")
-    }
+    val isTextOrCode: Boolean get() = !isFolderItem && (!isEncrypted || originalMetadataAvailable) && (
+        isNoteItem || allTypeCandidates.any {
+            it in listOf("note", "txt", "text", "json", "js", "ts", "py", "java", "kt", "c", "cpp", "h", "cs", "html", "css", "xml", "yml", "yaml", "sh", "sql", "log", "csv", "env", "md", "markdown", "properties", "gradle", "toml", "conf") ||
+                it.startsWith("text/") || it.contains("json")
+        }
+    )
 
     val isPdf: Boolean get() = !isFolderItem && (!isEncrypted || originalMetadataAvailable) && allTypeCandidates.any {
         it == "pdf" || it.contains("pdf")
@@ -437,12 +526,19 @@ data class ActiveSessionDto(
     val sessionId: String? = null,
     val deviceName: String = "Cloudyte Client",
     val userAgent: String? = null,
+    val ip: String? = null,
+    val ipHistory: List<String>? = null,
     val createdAt: String? = null,
     val lastActiveAt: String? = null,
+    val lastUsedAt: String? = null,
     val expiresAt: String? = null,
     val isCurrent: Boolean = false
 ) {
     val effectiveId: String get() = sessionId?.takeIf { it.isNotBlank() } ?: id
+    val effectiveLastSeenRaw: String?
+        get() = lastUsedAt?.takeIf { it.isNotBlank() }
+            ?: lastActiveAt?.takeIf { it.isNotBlank() }
+            ?: createdAt?.takeIf { it.isNotBlank() }
 }
 
 @JsonClass(generateAdapter = true)
@@ -478,6 +574,9 @@ data class JobStatusResponse(
     val totalItems: Int? = null,
     val source: JobEndpointRef? = null,
     val destination: JobEndpointRef? = null,
+    val sourceAccountName: String? = null,
+    val targetAccountName: String? = null,
+    val destinationAccountName: String? = null,
     val isMove: Boolean? = null,
     val attempts: Int? = null,
     val maxAttempts: Int? = null,
@@ -490,6 +589,15 @@ data class JobStatusResponse(
 ) {
     val effectiveId: String
         get() = jobId?.takeIf { it.isNotBlank() } ?: id
+
+    val effectiveSourceDriveName: String?
+        get() = source?.driveName?.takeIf { it.isNotBlank() }
+            ?: sourceAccountName?.takeIf { it.isNotBlank() }
+
+    val effectiveDestDriveName: String?
+        get() = destination?.driveName?.takeIf { it.isNotBlank() }
+            ?: targetAccountName?.takeIf { it.isNotBlank() }
+            ?: destinationAccountName?.takeIf { it.isNotBlank() }
 
     val effectiveProgressPct: Int
         get() = (progressPct ?: progress ?: run {
@@ -529,7 +637,7 @@ data class DriveManifestFile(
     val mimeType: String? = null,
     val updatedAt: String? = null,
     val isEncrypted: Boolean = false,
-    val isNote: Boolean = false
+    val isNote: Boolean? = false
 )
 
 @JsonClass(generateAdapter = true)

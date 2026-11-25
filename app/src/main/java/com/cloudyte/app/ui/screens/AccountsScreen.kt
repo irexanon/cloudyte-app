@@ -1,8 +1,11 @@
 package com.cloudyte.app.ui.screens
 
 import android.app.Application
+import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -46,9 +49,11 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
@@ -101,8 +106,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.cloudyte.app.R
 import com.cloudyte.app.api.Account
+import com.cloudyte.app.api.AccountRenameRequest
 import com.cloudyte.app.api.ApiClient
 import com.cloudyte.app.api.UserSettingsRequest
+import com.cloudyte.app.data.DriveAliasStore
 import com.cloudyte.app.data.UserPreferences
 import com.cloudyte.app.db.AppDatabase
 import com.cloudyte.app.db.LocalAccount
@@ -113,10 +120,14 @@ import com.cloudyte.app.ui.components.LocalBottomBarInset
 import com.cloudyte.app.ui.components.WavyProgressBar
 import com.cloudyte.app.ui.theme.MetricTextStyle
 import com.cloudyte.app.ui.theme.cloudyteColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -153,7 +164,7 @@ class AccountsViewModel(application: Application) : AndroidViewModel(application
 
             _errorMessage.value = null
             try {
-                val accs = ApiClient.apiService.getAccounts()
+                val accs = DriveAliasStore.applyAliases(getApplication(), ApiClient.apiService.getAccounts())
                 val validIds = accs.mapTo(mutableSetOf()) { it.effectiveId }
                 val staleIds = db.accountDao().getAllAccounts()
                     .map { it.id }
@@ -183,6 +194,7 @@ class AccountsViewModel(application: Application) : AndroidViewModel(application
             try {
                 val res = ApiClient.apiService.deleteAccount(id)
                 if (res.isSuccessful || res.code() == 404) {
+                    DriveAliasStore.removeAlias(getApplication(), id)
                     com.cloudyte.app.data.AccountSessionHelper.purgeDisconnectedAccount(getApplication(), id)
                     _accounts.value = _accounts.value.filter { it.effectiveId != id }
                     deleted = true
@@ -204,8 +216,9 @@ class AccountsViewModel(application: Application) : AndroidViewModel(application
     fun setDefaultAccount(id: String, onComplete: () -> Unit) {
         viewModelScope.launch {
             try {
+                // Only send isDefaultAccId so backend preserves existing backupEnabled/backupAccId settings.
                 ApiClient.apiService.updateSettings(
-                    UserSettingsRequest(backupEnabled = false, backupAccId = null, isDefaultAccId = id)
+                    UserSettingsRequest(isDefaultAccId = id)
                 )
             } catch (e: Exception) {
                 Log.e("AccountsViewModel", "Set default account error", e)
@@ -219,13 +232,99 @@ class AccountsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun renameAccount(id: String, newName: String, onComplete: () -> Unit) {
+    fun renameAccount(id: String, newName: String, onComplete: (String) -> Unit) {
         viewModelScope.launch {
+            val trimmed = newName.trim()
+            if (trimmed.isEmpty()) return@launch
+            var savedOnServer = false
+            try {
+                val res = ApiClient.apiService.renameAccount(id, AccountRenameRequest(name = trimmed, driveName = trimmed))
+                savedOnServer = res.isSuccessful
+            } catch (e: Exception) {
+                Log.w("AccountsViewModel", "Server rename unavailable, persisting local alias: ${e.message}")
+            }
+            if (savedOnServer) {
+                DriveAliasStore.removeAlias(getApplication(), id)
+            } else {
+                DriveAliasStore.setAlias(getApplication(), id, trimmed)
+            }
             _accounts.value = _accounts.value.map {
-                if (it.effectiveId == id) it.copy(name = newName, driveName = newName) else it
+                if (it.effectiveId == id) it.copy(name = trimmed, driveName = trimmed) else it
             }
             db.accountDao().insertAccounts(_accounts.value.map { LocalAccount.fromAccount(it) })
-            onComplete()
+            onComplete(if (savedOnServer) "Drive renamed" else "Drive renamed (saved on device)")
+        }
+    }
+
+    fun importTgDriveJson(accountId: String, uri: Uri, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val msg = withContext(Dispatchers.IO) {
+                try {
+                    val resolver = getApplication<Application>().contentResolver
+                    val bytes = resolver.openInputStream(uri)?.use { input ->
+                        val maxBytes = 15 * 1024 * 1024
+                        val buffer = java.io.ByteArrayOutputStream()
+                        val chunk = ByteArray(16 * 1024)
+                        var total = 0
+                        while (true) {
+                            val read = input.read(chunk)
+                            if (read <= 0) break
+                            total += read
+                            if (total > maxBytes) {
+                                return@withContext "Import file exceeds 15 MB limit."
+                            }
+                            buffer.write(chunk, 0, read)
+                        }
+                        buffer.toByteArray()
+                    } ?: return@withContext "Could not read selected JSON file."
+
+                    if (bytes.isEmpty()) return@withContext "Selected JSON file is empty."
+
+                    val body = bytes.toRequestBody("application/json; charset=utf-8".toMediaType())
+                    val resp = ApiClient.apiService.importTgDrive(accountId, body)
+                    if (resp.isSuccessful) {
+                        val data = resp.body()
+                        val imported = data?.importedFiles ?: 0
+                        val skipped = data?.skippedDuplicates ?: 0
+                        val topicsPart = if ((data?.importedTopics ?: 0) > 0) ", ${data?.importedTopics} topic(s)" else ""
+                        "Imported $imported file(s)$topicsPart" + if (skipped > 0) " ($skipped duplicate skipped)" else ""
+                    } else {
+                        val raw = runCatching { resp.errorBody()?.string() }.getOrNull()
+                        ApiClient.parseError(raw, resp.code())
+                    }
+                } catch (e: Exception) {
+                    Log.e("AccountsViewModel", "TG import failed", e)
+                    e.localizedMessage ?: "Telegram Drive import failed."
+                }
+            }
+            loadAccounts()
+            onResult(msg)
+        }
+    }
+
+    fun exportTgDriveJson(accountId: String, uri: Uri, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val msg = withContext(Dispatchers.IO) {
+                try {
+                    val resp = ApiClient.apiService.exportTgDrive(accountId)
+                    if (!resp.isSuccessful) {
+                        val raw = runCatching { resp.errorBody()?.string() }.getOrNull()
+                        return@withContext ApiClient.parseError(raw, resp.code())
+                    }
+                    val responseBody = resp.body() ?: return@withContext "Empty export response from server."
+                    val resolver = getApplication<Application>().contentResolver
+                    val written = resolver.openOutputStream(uri)?.use { out ->
+                        responseBody.byteStream().use { input ->
+                            input.copyTo(out)
+                        }
+                    } ?: return@withContext "Could not open destination file for writing."
+                    "Exported TG Drive index (${formatBytes(written)})"
+                } catch (e: Exception) {
+                    Log.e("AccountsViewModel", "TG export failed", e)
+                    e.localizedMessage ?: "Telegram Drive export failed."
+                }
+            }
+            onResult(msg)
         }
     }
 }
@@ -267,6 +366,38 @@ fun AccountsScreen(
     var renameInput by remember { mutableStateOf("") }
     var driveForCopyMove by remember { mutableStateOf<Pair<Account, Boolean>?>(null) }
     var driveForDownload by remember { mutableStateOf<Account?>(null) }
+    var tgImportTargetAccount by remember { mutableStateOf<Account?>(null) }
+    var tgExportTargetAccount by remember { mutableStateOf<Account?>(null) }
+
+    val tgImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val target = tgImportTargetAccount
+        tgImportTargetAccount = null
+        if (uri != null && target != null) {
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar("Importing Telegram Drive index...")
+            }
+            viewModel.importTgDriveJson(target.effectiveId, uri) { msg ->
+                coroutineScope.launch { snackbarHostState.showSnackbar(msg) }
+            }
+        }
+    }
+
+    val tgExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        val target = tgExportTargetAccount
+        tgExportTargetAccount = null
+        if (uri != null && target != null) {
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar("Exporting Telegram Drive index...")
+            }
+            viewModel.exportTgDriveJson(target.effectiveId, uri) { msg ->
+                coroutineScope.launch { snackbarHostState.showSnackbar(msg) }
+            }
+        }
+    }
 
     val listState = rememberLazyListState()
 
@@ -389,9 +520,9 @@ fun AccountsScreen(
                     onClick = {
                         val acc = accountForRename ?: return@Button
                         if (renameInput.isNotBlank()) {
-                            viewModel.renameAccount(acc.effectiveId, renameInput.trim()) {
+                            viewModel.renameAccount(acc.effectiveId, renameInput.trim()) { statusMsg ->
                                 coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("Drive renamed")
+                                    snackbarHostState.showSnackbar(statusMsg)
                                 }
                             }
                         }
@@ -751,6 +882,21 @@ fun AccountsScreen(
                                             showChooserInAddDialog = false
                                             showAddDialog = true
                                         },
+                                        onImportTgDrive = if (isTelegramAccount(account)) {
+                                            {
+                                                tgImportTargetAccount = account
+                                                tgImportLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                                            }
+                                        } else null,
+                                        onExportTgDrive = if (isTelegramAccount(account)) {
+                                            {
+                                                tgExportTargetAccount = account
+                                                val safeName = account.effectiveName
+                                                    .replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                                                    .ifBlank { "tgdrive" }
+                                                tgExportLauncher.launch("${safeName}_export.json")
+                                            }
+                                        } else null,
                                         modifier = Modifier.animateItem()
                                     )
                                 }
@@ -816,6 +962,8 @@ fun AccountCard(
     onRefresh: () -> Unit,
     onDisconnect: () -> Unit,
     onReconnect: () -> Unit,
+    onImportTgDrive: (() -> Unit)? = null,
+    onExportTgDrive: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(24.dp)
 ) {
@@ -916,6 +1064,31 @@ fun AccountCard(
                                 )
                             }
                         }
+                        if (account.isForumGroup) {
+                            Surface(
+                                color = ext.providerTelegramBg,
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Forum,
+                                        contentDescription = null,
+                                        tint = ext.providerTelegram,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = "Forum",
+                                        color = ext.providerTelegram,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     val subtitleText = if (!account.email.isNullOrBlank()) {
@@ -976,6 +1149,28 @@ fun AccountCard(
                             },
                             modifier = Modifier.testTag("account_menu_download_drive_${account.effectiveId}")
                         )
+                        if (onImportTgDrive != null) {
+                            DropdownMenuItem(
+                                text = { Text("Import TG Index (JSON)", color = MaterialTheme.colorScheme.onSurface) },
+                                leadingIcon = { Icon(Icons.Default.CloudUpload, contentDescription = null, tint = ext.providerTelegram) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onImportTgDrive()
+                                },
+                                modifier = Modifier.testTag("account_menu_tg_import_${account.effectiveId}")
+                            )
+                        }
+                        if (onExportTgDrive != null) {
+                            DropdownMenuItem(
+                                text = { Text("Export TG Index (JSON)", color = MaterialTheme.colorScheme.onSurface) },
+                                leadingIcon = { Icon(Icons.Default.CloudDownload, contentDescription = null, tint = ext.providerTelegram) },
+                                onClick = {
+                                    menuExpanded = false
+                                    onExportTgDrive()
+                                },
+                                modifier = Modifier.testTag("account_menu_tg_export_${account.effectiveId}")
+                            )
+                        }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.action_rename), color = MaterialTheme.colorScheme.onSurface) },
@@ -1080,6 +1275,48 @@ fun AccountCard(
                     color = statsAccentColor,
                     maxLines = 1
                 )
+            }
+
+            if (account.hasError) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ErrorOutline,
+                            contentDescription = "Drive connection error",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = account.effectiveErrorMessage ?: "Connection expired — reconnect required",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = onReconnect,
+                            modifier = Modifier.testTag("account_reconnect_error_${account.effectiveId}")
+                        ) {
+                            Text(
+                                text = "Reconnect",
+                                color = MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
         }
     }

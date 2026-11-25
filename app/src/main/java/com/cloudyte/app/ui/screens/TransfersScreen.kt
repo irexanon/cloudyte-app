@@ -920,9 +920,9 @@ private fun ServerJobItemCard(
         else -> "Server Job"
     }
 
-    val sourceName = job.source?.driveName?.takeIf { it.isNotBlank() }
+    val sourceName = job.effectiveSourceDriveName
         ?: job.source?.accountId?.let { accountNamesById[it] }
-    val destName = job.destination?.driveName?.takeIf { it.isNotBlank() }
+    val destName = job.effectiveDestDriveName
         ?: job.destination?.accountId?.let { accountNamesById[it] }
     val routeLine = when {
         !sourceName.isNullOrBlank() && !destName.isNullOrBlank() -> "$sourceName → $destName"

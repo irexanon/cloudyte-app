@@ -348,7 +348,12 @@ class HomeViewModel(
                             .getOrNull()
                     }
                     val accountsDeferred = async {
-                        runCatching { api.getAccounts() }
+                        runCatching {
+                            com.cloudyte.app.data.DriveAliasStore.applyAliases(
+                                getApplication(),
+                                api.getAccounts()
+                            )
+                        }
                             .onFailure { Log.w("HomeViewModel", "Accounts call failed: ${it.message}") }
                     }
                     val preferredDeferred = async {

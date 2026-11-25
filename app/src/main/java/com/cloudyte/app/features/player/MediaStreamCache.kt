@@ -66,7 +66,6 @@ object MediaStreamCache {
     }
 
     fun createMediaSourceFactory(context: Context): MediaSource.Factory {
-        val apiHost = ApiClient.API_BASE_URL.toHttpUrlOrNull()?.host.orEmpty()
         val httpFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(30_000)
@@ -77,7 +76,12 @@ object MediaStreamCache {
             object : DataSource by delegate {
                 override fun open(dataSpec: DataSpec): Long {
                     val uri: Uri = dataSpec.uri
-                    val isTrustedOrigin = uri.scheme.equals("https", ignoreCase = true) &&
+                    val baseUrl = ApiClient.API_BASE_URL
+                    val apiHost = baseUrl.toHttpUrlOrNull()?.host.orEmpty()
+                    val allowHttp = baseUrl.startsWith("http://", ignoreCase = true)
+                    val schemeAllowed = uri.scheme.equals("https", ignoreCase = true) ||
+                        (allowHttp && uri.scheme.equals("http", ignoreCase = true))
+                    val isTrustedOrigin = schemeAllowed &&
                         !apiHost.isBlank() &&
                         uri.host.equals(apiHost, ignoreCase = true)
                     val token = ApiClient.getToken()

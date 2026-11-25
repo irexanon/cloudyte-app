@@ -1,16 +1,24 @@
 package com.cloudyte.app.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -19,6 +27,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.cloudyte.app.CloudyteApplication
 import com.cloudyte.app.api.CloudFile
@@ -34,7 +47,7 @@ import com.cloudyte.app.features.player.GDriveVideoContent
 import com.cloudyte.app.features.player.ViewerDarkBackdrop
 import com.cloudyte.app.features.player.formatFileSubtitle
 import com.cloudyte.app.features.player.performInAppDownload
-import com.cloudyte.app.features.player.performShareFileLink
+import com.cloudyte.app.ui.components.AdvancedShareBottomSheet
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -48,43 +61,70 @@ fun VideoPlayerScreen(
     val scope = rememberCoroutineScope()
     val app = context.applicationContext as? CloudyteApplication
 
-    var currentActiveFileId by remember { mutableStateOf(fileId) }
-    var dbVideo by remember(currentActiveFileId) { mutableStateOf<CloudFile?>(null) }
+    var dbVideos by remember(fileId) { mutableStateOf<List<CloudFile>>(emptyList()) }
 
-    LaunchedEffect(currentActiveFileId) {
+    LaunchedEffect(fileId, accountId) {
         if (app != null) {
-            val local = app.container.database.cloudFileDao().getFileById(currentActiveFileId)?.toCloudFile()
-            if (local != null) {
-                FileRepository.cacheFiles(listOf(local))
-                dbVideo = local
+            val localRow = app.container.database.cloudFileDao().getFileById(fileId)
+            val dbFile = localRow?.toCloudFile()
+            if (localRow != null && dbFile != null) {
+                FileRepository.cacheFiles(listOf(dbFile))
+                val folderVideos = app.container.database.cloudFileDao()
+                    .getFilesForFolder(localRow.accountId, localRow.folderId)
+                    .map { it.toCloudFile() }
+                    .filter { it.isVideo && !it.isFolderItem }
+                dbVideos = folderVideos.ifEmpty { listOf(dbFile) }
             }
         }
     }
 
-    val videoList = remember(dbVideo, fileId) {
-        val list = FileRepository.getActiveList().filter { it.isVideo }
+    val videoList = remember(dbVideos, fileId) {
+        val activeVideos = FileRepository.getActiveList().filter { it.isVideo && !it.isFolderItem }
         when {
-            list.any { it.effectiveId == fileId } -> list
-            dbVideo != null -> listOf(dbVideo!!)
-            else -> listOfNotNull(FileRepository.getFile(fileId))
+            activeVideos.any { it.effectiveId == fileId } -> activeVideos
+            dbVideos.any { it.effectiveId == fileId } -> dbVideos
+            else -> listOfNotNull(FileRepository.getFile(fileId) ?: dbVideos.firstOrNull())
         }
     }
 
-    val currentVideoIndex = videoList.indexOfFirst { it.effectiveId == currentActiveFileId }.coerceAtLeast(0)
+    val initialIndex = remember(videoList, fileId) {
+        videoList.indexOfFirst { it.effectiveId == fileId }.coerceAtLeast(0)
+    }
+
+    val pagerState = rememberPagerState(
+        initialPage = initialIndex.coerceIn(0, (videoList.size - 1).coerceAtLeast(0)),
+        pageCount = { videoList.size.coerceAtLeast(1) }
+    )
+
+    // Keep pager aligned if dbVideos finishes loading asynchronously with sibling videos
+    LaunchedEffect(videoList.size) {
+        val idx = videoList.indexOfFirst { it.effectiveId == fileId }
+        if (idx >= 0 && pagerState.currentPage != idx && videoList.size > 1) {
+            pagerState.scrollToPage(idx)
+        }
+    }
+
+    val currentVideoIndex = pagerState.currentPage.coerceIn(0, (videoList.size - 1).coerceAtLeast(0))
     val file = videoList.getOrNull(currentVideoIndex)
-        ?: remember(currentActiveFileId) { FileRepository.getFile(currentActiveFileId) }
-        ?: dbVideo
+        ?: remember(fileId) { FileRepository.getFile(fileId) }
+    val currentActiveFileId = file?.effectiveId ?: fileId
     val fileName = file?.effectiveName ?: "Video Player"
 
     val effectiveAccId = file?.effectiveAccountId?.takeIf { it.isNotBlank() }
         ?: accountId.takeIf { it.isNotBlank() && it != "all" && it != "root" }.orEmpty()
 
     var showControls by remember { mutableStateOf(true) }
+    var isControlsLocked by remember { mutableStateOf(false) }
+    var isActiveVideoPlaying by remember { mutableStateOf(false) }
+    var isScrubbing by remember { mutableStateOf(false) }
+    var interactionNonce by remember { mutableIntStateOf(0) }
+
     var showActionsSheet by remember { mutableStateOf(false) }
     var showInfoSheet by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showMoveCopyDialog by remember { mutableStateOf(false) }
+    var showAdvancedShareSheet by remember { mutableStateOf(false) }
     var isMoveAction by remember { mutableStateOf(true) }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -98,9 +138,62 @@ fun VideoPlayerScreen(
         }
     }
 
-    LaunchedEffect(showControls) {
-        if (showControls && !showActionsSheet && !showInfoSheet) {
-            delay(4500)
+    // Immersive cinema mode: hide system bars when controls are hidden; restore on exit
+    LaunchedEffect(showControls, isControlsLocked) {
+        val activity = context.findPlayerActivity() ?: return@LaunchedEffect
+        val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (showControls && !isControlsLocked) {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    // Keep screen awake while actively playing video
+    LaunchedEffect(isActiveVideoPlaying) {
+        val window = context.findPlayerActivity()?.window ?: return@LaunchedEffect
+        if (isActiveVideoPlaying) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    // Restore system bars, orientation, brightness, and keep-screen-on cleanly when exiting player
+    DisposableEffect(Unit) {
+        onDispose {
+            val activity = context.findPlayerActivity() ?: return@onDispose
+            val controller = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+            controller.show(WindowInsetsCompat.Type.systemBars())
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            val lp = activity.window.attributes
+            if (lp.screenBrightness >= 0f) {
+                lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                activity.window.attributes = lp
+            }
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    // Smart auto-hide controls only while playing, not scrubbing, and no dialogs open
+    LaunchedEffect(
+        showControls,
+        isActiveVideoPlaying,
+        isScrubbing,
+        showActionsSheet,
+        showInfoSheet,
+        showAdvancedShareSheet,
+        interactionNonce
+    ) {
+        if (showControls &&
+            isActiveVideoPlaying &&
+            !isScrubbing &&
+            !showActionsSheet &&
+            !showInfoSheet &&
+            !showAdvancedShareSheet
+        ) {
+            delay(4000L)
             showControls = false
         }
     }
@@ -115,6 +208,17 @@ fun VideoPlayerScreen(
                 showMoveCopyDialog = false
                 snackbarMsg = msg
             }
+        )
+    }
+
+    if (showAdvancedShareSheet && file != null) {
+        AdvancedShareBottomSheet(
+            accountId = effectiveAccId.ifBlank { accountId },
+            fileId = file.effectiveId,
+            fileName = file.effectiveName,
+            isEncrypted = file.isEncrypted,
+            onDismiss = { showAdvancedShareSheet = false },
+            onFeedback = { msg -> snackbarMsg = msg }
         )
     }
 
@@ -135,10 +239,8 @@ fun VideoPlayerScreen(
             isDownloadedOffline = file.effectiveId in downloadedIds,
             onDismiss = { showActionsSheet = false },
             onShare = {
-                scope.launch {
-                    val err = performShareFileLink(context, effectiveAccId, file)
-                    if (!err.isNullOrBlank()) snackbarMsg = err
-                }
+                showActionsSheet = false
+                showAdvancedShareSheet = true
             },
             onDownload = {
                 scope.launch {
@@ -231,35 +333,60 @@ fun VideoPlayerScreen(
                 .background(ViewerDarkBackdrop)
                 .testTag("video_player_root")
         ) {
-            if (file != null) {
-                GDriveVideoContent(
-                    file = file,
-                    accountId = effectiveAccId.ifBlank { accountId },
-                    isActive = true,
-                    showControls = showControls,
-                    onToggleControls = { showControls = !showControls },
-                    hasPrevious = currentVideoIndex > 0,
-                    hasNext = currentVideoIndex < videoList.size - 1,
-                    onPrevious = if (videoList.size > 1) {
-                        {
-                            if (currentVideoIndex > 0) {
-                                currentActiveFileId = videoList[currentVideoIndex - 1].effectiveId
+            if (videoList.isNotEmpty()) {
+                HorizontalPager(
+                    state = pagerState,
+                    beyondViewportPageCount = 1,
+                    pageSpacing = 12.dp,
+                    userScrollEnabled = !isControlsLocked && videoList.size > 1,
+                    key = { idx -> videoList.getOrNull(idx)?.effectiveId ?: "vid_$idx" },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("video_horizontal_pager")
+                ) { pageIndex ->
+                    val pageVideo = videoList[pageIndex]
+                    val pageAccId = pageVideo.effectiveAccountId.ifBlank {
+                        accountId.takeIf { it.isNotBlank() && it != "all" && it != "root" }.orEmpty()
+                    }
+                    val isCurrentPage = pagerState.currentPage == pageIndex
+                    GDriveVideoContent(
+                        file = pageVideo,
+                        accountId = pageAccId.ifBlank { accountId },
+                        isActive = isCurrentPage,
+                        showControls = showControls,
+                        onToggleControls = { showControls = !showControls },
+                        hasPrevious = pageIndex > 0,
+                        hasNext = pageIndex < videoList.size - 1,
+                        onPrevious = if (videoList.size > 1) {
+                            {
+                                if (pageIndex > 0) {
+                                    scope.launch { pagerState.animateScrollToPage(pageIndex - 1) }
+                                }
                             }
-                        }
-                    } else null,
-                    onNext = if (videoList.size > 1) {
-                        {
-                            if (currentVideoIndex < videoList.size - 1) {
-                                currentActiveFileId = videoList[currentVideoIndex + 1].effectiveId
+                        } else null,
+                        onNext = if (videoList.size > 1) {
+                            {
+                                if (pageIndex < videoList.size - 1) {
+                                    scope.launch { pagerState.animateScrollToPage(pageIndex + 1) }
+                                }
                             }
+                        } else null,
+                        isControlsLockedExternal = isControlsLocked,
+                        onControlsLockedChange = { isControlsLocked = it },
+                        onUserInteraction = { interactionNonce++ },
+                        onPlayingStateChange = { playing ->
+                            if (isCurrentPage) isActiveVideoPlaying = playing
+                        },
+                        onScrubbingStateChange = { scrubbing ->
+                            if (isCurrentPage) isScrubbing = scrubbing
                         }
-                    } else null
-                )
+                    )
+                }
             }
 
             val pageInfo = if (videoList.size > 1) "${currentVideoIndex + 1} of ${videoList.size}" else null
             GDriveTopBar(
-                visible = showControls,
+                visible = showControls && !isControlsLocked,
                 title = fileName,
                 subtitle = file?.let { formatFileSubtitle(it, pageInfo) },
                 file = file,
@@ -282,4 +409,10 @@ fun VideoPlayerScreen(
             )
         }
     }
+}
+
+private tailrec fun Context.findPlayerActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findPlayerActivity()
+    else -> null
 }

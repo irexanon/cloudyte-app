@@ -1,12 +1,17 @@
 package com.cloudyte.app.ui
 
+import android.widget.Toast
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.cloudyte.app.api.ApiClient
 import com.cloudyte.app.api.CloudFile
 import com.cloudyte.app.api.FileRepository
+import com.cloudyte.app.data.AccountSessionHelper
 import com.cloudyte.app.features.player.AudioPlayerScreen as FeatureAudioPlayerScreen
 import com.cloudyte.app.features.player.ImageViewerScreen as FeatureImageViewerScreen
 import com.cloudyte.app.features.player.PdfViewerScreen as FeaturePdfViewerScreen
@@ -54,7 +59,22 @@ fun openFileInViewer(
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
-    
+    val context = LocalContext.current
+
+    LaunchedEffect(navController) {
+        ApiClient.sessionExpiredEvents.collect {
+            val currentRoute = navController.currentBackStackEntry?.destination?.route
+            AccountSessionHelper.performLogout(context, remoteLogoutCall = { false })
+            if (currentRoute != "login" && currentRoute != "splash") {
+                Toast.makeText(context, "Session expired. Please sign in again.", Toast.LENGTH_LONG).show()
+                navController.navigate("login") {
+                    popUpTo(0) { inclusive = true }
+                    launchSingleTop = true
+                }
+            }
+        }
+    }
+
     NavHost(
         navController = navController,
         startDestination = "splash",

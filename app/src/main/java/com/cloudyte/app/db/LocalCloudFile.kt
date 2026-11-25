@@ -41,7 +41,8 @@ data class LocalCloudFile(
     val encryptedChecksum: String? = null,
     val opaqueRemoteName: String? = null,
     val plaintextSizeBytes: Long? = null,
-    val originalMetadataAvailable: Boolean = false
+    val originalMetadataAvailable: Boolean = false,
+    val isNote: Boolean = false
 ) {
     fun toCloudFile(): CloudFile {
         val parsedEnvelope = if (!encryptedMetadata.isNullOrBlank()) {
@@ -99,7 +100,8 @@ data class LocalCloudFile(
                 !isEncrypted -> "PLAINTEXT"
                 originalMetadataAvailable -> "AVAILABLE"
                 else -> "UNAVAILABLE"
-            }
+            },
+            isNote = this.isNote
         )
     }
 
@@ -157,7 +159,8 @@ data class LocalCloudFile(
                 encryptedChecksum = file.encryptedChecksum,
                 opaqueRemoteName = rawRemoteName,
                 plaintextSizeBytes = file.plaintextSizeBytes,
-                originalMetadataAvailable = file.originalMetadataAvailable
+                originalMetadataAvailable = file.originalMetadataAvailable,
+                isNote = file.isNoteItem
             )
         }
 

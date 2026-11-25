@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Visibility
@@ -78,6 +79,7 @@ import com.cloudyte.app.ui.components.AmbientCornerSquircle
 import com.cloudyte.app.ui.components.AppLoadingIndicator
 import com.cloudyte.app.ui.components.CloudyteLogoMark
 import com.cloudyte.app.ui.components.CloudyteWordmark
+import com.cloudyte.app.ui.components.ServerUrlConfigDialog
 import com.cloudyte.app.ui.theme.cloudyteColors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -179,7 +181,20 @@ fun LoginScreen(navController: NavController, viewModel: LoginViewModel = viewMo
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val isRegisterMode by viewModel.isRegisterMode.collectAsState()
+    val currentServerUrl by ApiClient.baseUrlFlow.collectAsState()
+    var showServerDialog by remember { mutableStateOf(false) }
     val ext = MaterialTheme.cloudyteColors
+
+    if (showServerDialog) {
+        ServerUrlConfigDialog(
+            currentUrl = currentServerUrl,
+            onDismiss = { showServerDialog = false },
+            onSaved = {
+                showServerDialog = false
+                viewModel.clearError()
+            }
+        )
+    }
 
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { innerPadding ->
         Box(
@@ -392,32 +407,56 @@ fun LoginScreen(navController: NavController, viewModel: LoginViewModel = viewMo
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(
-                        text = if (isRegisterMode) {
-                            stringResource(R.string.login_have_account)
-                        } else {
-                            stringResource(R.string.login_no_account)
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    TextButton(onClick = { viewModel.toggleMode() }) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
                         Text(
                             text = if (isRegisterMode) {
-                                stringResource(R.string.login_cta)
+                                stringResource(R.string.login_have_account)
                             } else {
-                                stringResource(R.string.login_register_action)
+                                stringResource(R.string.login_no_account)
                             },
-                            color = ext.lightAccent,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(onClick = { viewModel.toggleMode() }) {
+                            Text(
+                                text = if (isRegisterMode) {
+                                    stringResource(R.string.login_cta)
+                                } else {
+                                    stringResource(R.string.login_register_action)
+                                },
+                                color = ext.lightAccent,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    TextButton(
+                        onClick = { showServerDialog = true },
+                        modifier = Modifier.testTag("login_server_url_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Dns,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Server: ${currentServerUrl.removePrefix("https://").removePrefix("http://")}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

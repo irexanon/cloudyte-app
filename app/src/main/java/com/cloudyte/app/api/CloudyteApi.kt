@@ -59,6 +59,12 @@ interface CloudyteApi {
     @DELETE("/api/accounts/{id}")
     suspend fun deleteAccount(@Path("id") id: String): Response<Unit>
 
+    @PATCH("/api/accounts/{id}")
+    suspend fun renameAccount(
+        @Path("id") id: String,
+        @Body request: AccountRenameRequest
+    ): Response<Unit>
+
     @GET("/api/auth/drive-link")
     suspend fun getGoogleDriveLink(): OAuthLinkResponse
 
@@ -67,6 +73,18 @@ interface CloudyteApi {
 
     @POST("/api/tgdrive/register")
     suspend fun registerTgDrive(@Body request: TgDriveRegisterRequest): Response<Unit>
+
+    @POST("/api/tgdrive/{accountId}/import")
+    suspend fun importTgDrive(
+        @Path("accountId") accountId: String,
+        @Body body: RequestBody
+    ): Response<TgDriveImportResponse>
+
+    @Streaming
+    @GET("/api/tgdrive/{accountId}/export")
+    suspend fun exportTgDrive(
+        @Path("accountId") accountId: String
+    ): Response<ResponseBody>
 
     @GET("/api/files")
     suspend fun getFiles(
@@ -230,6 +248,12 @@ interface CloudyteApi {
 
     @POST("/api/share")
     suspend fun shareFile(@Body request: ShareRequest): ShareResponse
+
+    @GET("/api/shares")
+    suspend fun getShares(): List<ActiveShareDto>
+
+    @DELETE("/api/share/{shareId}")
+    suspend fun revokeShare(@Path("shareId") shareId: String): Response<Unit>
 
     @GET("/api/storage/summary")
     suspend fun getStorageSummary(

@@ -14,6 +14,7 @@ import okhttp3.Cache
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -21,15 +22,61 @@ import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 import java.io.File
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 object ApiClient {
     private const val TOKEN_KEY = "auth_token"
+    private const val SERVER_URL_KEY = "custom_server_url"
     private const val SECURE_PREFS_NAME = "cloudyte_secure_prefs"
-    // Configurable API URL
-    const val API_BASE_URL = "https://drive.arshman.me"
+    private const val CONFIG_PREFS_NAME = "cloudyte_server_config"
+    const val DEFAULT_API_BASE_URL = "https://drive.arshman.me"
 
-    private val apiHost: String by lazy { API_BASE_URL.toHttpUrl().host }
+    @Volatile
+    var API_BASE_URL: String = DEFAULT_API_BASE_URL
+        private set
+
+    private val _baseUrlFlow = MutableStateFlow(DEFAULT_API_BASE_URL)
+    val baseUrlFlow: StateFlow<String> = _baseUrlFlow.asStateFlow()
+
+    private val _sessionExpiredEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val sessionExpiredEvents: SharedFlow<Unit> = _sessionExpiredEvents.asSharedFlow()
+
+    private var lastHttpCache: Cache? = null
+
+    private val knownConfiguredHosts = java.util.concurrent.CopyOnWriteArraySet<String>().apply {
+        add(DEFAULT_API_BASE_URL.toHttpUrl().host.lowercase())
+    }
+
+    private fun currentApiHost(): String =
+        API_BASE_URL.toHttpUrlOrNull()?.host ?: DEFAULT_API_BASE_URL.toHttpUrl().host
+
+    private val dynamicBaseUrlInterceptor = Interceptor { chain ->
+        val request = chain.request()
+        val targetBase = API_BASE_URL.toHttpUrlOrNull()
+        val reqHostLower = request.url.host.lowercase()
+        val isOwnApiRequest = reqHostLower in knownConfiguredHosts
+        if (targetBase != null && isOwnApiRequest &&
+            (request.url.scheme != targetBase.scheme ||
+                !request.url.host.equals(targetBase.host, ignoreCase = true) ||
+                request.url.port != targetBase.port)
+        ) {
+            val rewrittenUrl = request.url.newBuilder()
+                .scheme(targetBase.scheme)
+                .host(targetBase.host)
+                .port(targetBase.port)
+                .build()
+            chain.proceed(request.newBuilder().url(rewrittenUrl).build())
+        } else {
+            chain.proceed(request)
+        }
+    }
+
     private val querySecretRegex = Regex("""(?i)([?&](?:token|sig|access_token|refresh_token|password|passphrase|secret|api_key)=)([^&\s]+)""")
 
     private var sharedPreferences: SharedPreferences? = null
@@ -63,16 +110,80 @@ object ApiClient {
         initDeferred?.await()
     }
 
+    fun normalizeServerUrl(raw: String): Result<String> {
+        val trimmed = raw.trim().trimEnd('/')
+        if (trimmed.isEmpty()) {
+            return Result.success(DEFAULT_API_BASE_URL)
+        }
+        val withScheme = if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+            trimmed
+        } else {
+            "https://$trimmed"
+        }
+        val parsed = withScheme.toHttpUrlOrNull()
+            ?: return Result.failure(IllegalArgumentException("Enter a valid server URL (e.g. https://drive.example.com)"))
+        val normalized = "${parsed.scheme}://${parsed.host}" +
+            (if ((parsed.scheme == "https" && parsed.port != 443) || (parsed.scheme == "http" && parsed.port != 80)) ":${parsed.port}" else "") +
+            parsed.encodedPath.trimEnd('/')
+        return Result.success(normalized)
+    }
+
+    @Synchronized
+    fun setBaseUrl(context: Context, rawUrl: String?): Result<String> {
+        val target = if (rawUrl.isNullOrBlank()) {
+            Result.success(DEFAULT_API_BASE_URL)
+        } else {
+            normalizeServerUrl(rawUrl)
+        }
+        val normalized = target.getOrElse { return Result.failure(it) }
+        val prefs = context.applicationContext.getSharedPreferences(CONFIG_PREFS_NAME, Context.MODE_PRIVATE)
+        if (normalized == DEFAULT_API_BASE_URL) {
+            prefs.edit().remove(SERVER_URL_KEY).apply()
+        } else {
+            prefs.edit().putString(SERVER_URL_KEY, normalized).apply()
+        }
+        if (API_BASE_URL != normalized) {
+            normalized.toHttpUrlOrNull()?.host?.lowercase()?.let { knownConfiguredHosts.add(it) }
+            API_BASE_URL = normalized
+            _baseUrlFlow.value = normalized
+            signedMediaCache.clear()
+            rebuildRetrofitClient()
+        }
+        return Result.success(normalized)
+    }
+
+    private fun rebuildRetrofitClient() {
+        okHttpClient = createClient(lastHttpCache)
+        retrofit = Retrofit.Builder()
+            .baseUrl("$API_BASE_URL/")
+            .client(okHttpClient)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+        apiService = retrofit.create(CloudyteApi::class.java)
+    }
+
     private val authInterceptor = Interceptor { chain ->
         val request = chain.request()
         val path = request.url.encodedPath
         val requestBuilder = request.newBuilder()
         val token = getToken()
-        val isTrustedOrigin = request.url.isHttps && request.url.host.equals(apiHost, ignoreCase = true)
-        if (isTrustedOrigin && !token.isNullOrEmpty() && !path.endsWith("/login") && !path.endsWith("/register")) {
+        val baseAllowsHttp = API_BASE_URL.startsWith("http://", ignoreCase = true)
+        val isTrustedOrigin = (request.url.isHttps || baseAllowsHttp) &&
+            request.url.host.equals(currentApiHost(), ignoreCase = true)
+        val isPublicAuthRoute = path == "/api/login" || path == "/api/register"
+        val attachBearer = isTrustedOrigin && !token.isNullOrEmpty() && !isPublicAuthRoute
+        if (attachBearer) {
             requestBuilder.header("Authorization", "Bearer $token")
         }
-        chain.proceed(requestBuilder.build())
+        val response = chain.proceed(requestBuilder.build())
+        if (response.code == 401 && attachBearer && path != "/api/logout") {
+            // Only expire session if the rejected token is still the active session token.
+            if (getToken() == token) {
+                saveToken(null)
+                _sessionExpiredEvents.tryEmit(Unit)
+            }
+        }
+        response
     }
 
     fun parseErrorEnvelope(errorBody: String?, statusCode: Int, isRegister: Boolean = false): ParsedApiError {
@@ -173,6 +284,7 @@ object ApiClient {
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(300, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
+            .addInterceptor(dynamicBaseUrlInterceptor)
             .addInterceptor(RequestCorrelationInterceptor())
             .addInterceptor(authInterceptor)
             .addInterceptor(loggingInterceptor)
@@ -192,7 +304,7 @@ object ApiClient {
 
     @Volatile
     private var retrofit: Retrofit = Retrofit.Builder()
-        .baseUrl(API_BASE_URL)
+        .baseUrl("$API_BASE_URL/")
         .client(okHttpClient)
         .addConverterFactory(MoshiConverterFactory.create(moshi))
         .build()
@@ -236,6 +348,18 @@ object ApiClient {
         // Remove any legacy plaintext fallback token file so tokens never persist unencrypted on disk
         runCatching { context.deleteSharedPreferences("cloudyte_secure_fallback") }
 
+        // Restore custom server URL if configured
+        val savedServerUrl = runCatching {
+            context.applicationContext
+                .getSharedPreferences(CONFIG_PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(SERVER_URL_KEY, null)
+                ?.takeIf { it.isNotBlank() }
+        }.getOrNull()
+        val resolvedBaseUrl = savedServerUrl?.let { normalizeServerUrl(it).getOrNull() } ?: DEFAULT_API_BASE_URL
+        resolvedBaseUrl.toHttpUrlOrNull()?.host?.lowercase()?.let { knownConfiguredHosts.add(it) }
+        API_BASE_URL = resolvedBaseUrl
+        _baseUrlFlow.value = resolvedBaseUrl
+
         sharedPreferences = try {
             val secure = openEncryptedPrefs(context)
             val legacy = context.getSharedPreferences("cloudyte_prefs", Context.MODE_PRIVATE)
@@ -255,14 +379,8 @@ object ApiClient {
             }
         }
         inMemoryToken = inMemoryToken ?: sharedPreferences?.getString(TOKEN_KEY, null)
-        val httpCache = Cache(File(context.cacheDir, "http"), 50L * 1024 * 1024)
-        okHttpClient = createClient(httpCache)
-        retrofit = Retrofit.Builder()
-            .baseUrl(API_BASE_URL)
-            .client(okHttpClient)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-        apiService = retrofit.create(CloudyteApi::class.java)
+        lastHttpCache = Cache(File(context.cacheDir, "http"), 50L * 1024 * 1024)
+        rebuildRetrofitClient()
         initDeferred?.complete(Unit)
     }
 

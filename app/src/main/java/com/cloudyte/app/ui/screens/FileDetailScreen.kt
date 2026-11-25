@@ -72,6 +72,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.cloudyte.app.R
 import com.cloudyte.app.api.ApiClient
+import com.cloudyte.app.ui.components.AdvancedShareBottomSheet
 import com.cloudyte.app.ui.components.AppLoadingIndicator
 import com.cloudyte.app.ui.components.ExpressiveStarburstBadge
 import com.cloudyte.app.ui.components.FileThumb
@@ -103,6 +104,7 @@ fun FileDetailScreen(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showMoveCopyDialog by remember { mutableStateOf(false) }
     var isMoveAction by remember { mutableStateOf(true) }
+    var showAdvancedShareSheet by remember { mutableStateOf(false) }
     var actionFeedbackMessage by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -142,6 +144,21 @@ fun FileDetailScreen(
                     navController.popBackStack()
                 }
             }
+        )
+    }
+
+    if (showAdvancedShareSheet && file != null) {
+        val target = file!!
+        val shareAccId = target.effectiveAccountId.ifBlank {
+            accountId.takeIf { it.isNotBlank() && it != "all" && it != "root" }.orEmpty()
+        }
+        AdvancedShareBottomSheet(
+            accountId = shareAccId,
+            fileId = target.effectiveId,
+            fileName = target.effectiveName,
+            isEncrypted = target.isEncrypted,
+            onDismiss = { showAdvancedShareSheet = false },
+            onFeedback = { msg -> actionFeedbackMessage = msg }
         )
     }
 
@@ -437,7 +454,10 @@ fun FileDetailScreen(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                     )
                 }
-                val extLabel = nonNullFile.effectiveType.uppercase().ifBlank { "FILE" }
+                val extLabel = when {
+                    nonNullFile.isNoteItem -> "TG NOTE"
+                    else -> nonNullFile.effectiveType.uppercase().ifBlank { "FILE" }
+                }
                 Surface(
                     shape = CircleShape,
                     color = ext.mintSuccess
@@ -751,10 +771,11 @@ fun FileDetailScreen(
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceContainer,
-                    onClick = { viewModel.shareFile(accountId, nonNullFile.effectiveId) },
+                    onClick = { showAdvancedShareSheet = true },
                     modifier = Modifier
                         .weight(1f)
                         .heightIn(min = 54.dp)
+                        .testTag("file_detail_share_button")
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp),

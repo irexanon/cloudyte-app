@@ -17,7 +17,12 @@ data class LocalAccount(
     val fileCount: Int,
     val isDefault: Boolean,
     val channelId: String?,
-    val cachedAt: Long = System.currentTimeMillis()
+    val cachedAt: Long = System.currentTimeMillis(),
+    val error: String? = null,
+    val errorMessage: String? = null,
+    val errorCode: String? = null,
+    val isForum: Boolean = false,
+    val chatType: String? = null
 ) {
     fun toAccount(): Account {
         return Account(
@@ -31,7 +36,12 @@ data class LocalAccount(
             percentage = this.percentage,
             fileCount = this.fileCount,
             isDefault = this.isDefault,
-            channelId = this.channelId
+            channelId = this.channelId,
+            error = this.error,
+            errorMessage = this.errorMessage,
+            errorCode = this.errorCode,
+            isForum = this.isForum,
+            chatType = this.chatType
         )
     }
 
@@ -48,7 +58,12 @@ data class LocalAccount(
                 percentage = account.effectivePercentage,
                 fileCount = account.fileCount ?: 0,
                 isDefault = account.isDefault == true,
-                channelId = account.channelId
+                channelId = account.channelId,
+                error = account.errorAsString,
+                errorMessage = account.errorMessage,
+                errorCode = account.errorCodeString,
+                isForum = account.isForum == true,
+                chatType = account.chatType
             )
         }
     }

@@ -21,7 +21,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ThumbnailEntity::class,
         BackupSourceEntity::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -324,6 +324,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE local_accounts ADD COLUMN error TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE local_accounts ADD COLUMN errorMessage TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE local_accounts ADD COLUMN errorCode TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE local_accounts ADD COLUMN isForum INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE local_accounts ADD COLUMN chatType TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE cloud_files ADD COLUMN isNote INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -345,7 +356,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_12_13,
                         MIGRATION_13_14,
                         MIGRATION_14_15,
-                        MIGRATION_15_16
+                        MIGRATION_15_16,
+                        MIGRATION_16_17
                     )
                     .build()
                 INSTANCE = instance

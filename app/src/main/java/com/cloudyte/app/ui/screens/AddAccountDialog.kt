@@ -380,7 +380,8 @@ fun AddAccountDialog(
                                             if (response.isSuccessful) {
                                                 onSuccess()
                                             } else {
-                                                errorMsg = "Failed to register Telegram Drive. Please verify the bot is an admin in your channel."
+                                                val rawErr = runCatching { response.errorBody()?.string() }.getOrNull()
+                                                errorMsg = ApiClient.parseError(rawErr, response.code())
                                             }
                                         } catch (e: Exception) {
                                             Log.e("AddAccountDialog", "TG register error", e)

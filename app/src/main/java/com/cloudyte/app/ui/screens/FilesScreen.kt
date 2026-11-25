@@ -500,7 +500,8 @@ class FilesViewModel(
                                 isFolder = false,
                                 accountId = accId,
                                 isEncrypted = item.isEncrypted,
-                                originalMetadataAvailable = true
+                                originalMetadataAvailable = true,
+                                isNote = item.isNote
                             )
                         }.filter { it.isImage || it.isVideo || it.isAudio }
                     },
@@ -636,7 +637,10 @@ class FilesViewModel(
                         currentAccountId.value = def.id
                     }
                 }
-                val fetched = api.getAccounts()
+                val fetched = com.cloudyte.app.data.DriveAliasStore.applyAliases(
+                    getApplication(),
+                    api.getAccounts()
+                )
                 if (fetched.isNotEmpty()) {
                     db.accountDao().insertAccounts(fetched.map { LocalAccount.fromAccount(it) })
                     val current = currentAccountId.value
@@ -1336,6 +1340,7 @@ fun FilesScreen(
     var singleMoveCopyTarget by remember { mutableStateOf<Pair<CloudFile, Boolean>?>(null) }
     var fileForActionSheet by remember { mutableStateOf<CloudFile?>(null) }
     var fileForQuickInfo by remember { mutableStateOf<CloudFile?>(null) }
+    var fileForAdvancedShare by remember { mutableStateOf<Pair<CloudFile, String>?>(null) }
     var folderForDownload by remember { mutableStateOf<Pair<String, CloudFile>?>(null) }
     var folderForDriveTransfer by remember { mutableStateOf<Pair<Account, CloudFile>?>(null) }
 
@@ -1724,6 +1729,17 @@ fun FilesScreen(
         )
     }
 
+    fileForAdvancedShare?.let { (shareFile, shareAccId) ->
+        com.cloudyte.app.ui.components.AdvancedShareBottomSheet(
+            accountId = shareAccId,
+            fileId = shareFile.effectiveId,
+            fileName = shareFile.effectiveName,
+            isEncrypted = shareFile.isEncrypted,
+            onDismiss = { fileForAdvancedShare = null },
+            onFeedback = { msg -> snackbarMessage = msg }
+        )
+    }
+
     fileForActionSheet?.let { sheetFile ->
         val resolvedSheetAcc = sheetFile.effectiveAccountId.ifBlank { effectiveAccountId }
         DriveItemActionSheet(
@@ -1741,10 +1757,7 @@ fun FilesScreen(
             },
             onToggleOffline = { viewModel.toggleOfflineAccess(sheetFile) },
             onShare = {
-                coroutineScope.launch {
-                    val err = performShareFileLink(context, resolvedSheetAcc, sheetFile)
-                    if (!err.isNullOrBlank()) snackbarMessage = err
-                }
+                fileForAdvancedShare = sheetFile to resolvedSheetAcc
             },
             onSendFileCopy = {
                 coroutineScope.launch {

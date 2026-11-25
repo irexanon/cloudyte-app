@@ -264,14 +264,33 @@ fun ActiveSessionsBottomSheet(
                                                 }
                                             }
                                         }
-                                        val lastSeen = session.lastActiveAt?.take(16)?.replace('T', ' ')
-                                            ?: session.createdAt?.take(16)?.replace('T', ' ')
+                                        val lastSeen = session.effectiveLastSeenRaw?.take(16)?.replace('T', ' ')
                                             ?: "Active now"
+                                        val ipSummary = buildString {
+                                            val primaryIp = session.ip?.takeIf { it.isNotBlank() }
+                                                ?: session.ipHistory?.firstOrNull { it.isNotBlank() }
+                                            if (!primaryIp.isNullOrBlank()) {
+                                                append("IP: ").append(primaryIp)
+                                                val extraIps = (session.ipHistory?.distinct()?.size ?: 0) - 1
+                                                if (extraIps > 0) {
+                                                    append(" (+$extraIps)")
+                                                }
+                                            }
+                                        }
                                         Text(
                                             text = "Last active: $lastSeen",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
+                                        if (ipSummary.isNotBlank()) {
+                                            Text(
+                                                text = ipSummary,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
                                     }
                                     if (!session.isCurrent) {
                                         if (isBusy) {

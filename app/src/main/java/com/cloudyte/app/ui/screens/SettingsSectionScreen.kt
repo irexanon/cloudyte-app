@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.OfflinePin
 import androidx.compose.material.icons.outlined.Palette
@@ -104,11 +105,13 @@ import com.cloudyte.app.db.AppDatabase
 import com.cloudyte.app.db.LocalAccount
 import com.cloudyte.app.sync.AutoSyncManager
 import com.cloudyte.app.ui.components.ActiveSessionsBottomSheet
+import com.cloudyte.app.ui.components.ActiveSharesBottomSheet
 import com.cloudyte.app.ui.components.ChoiceDialog
 import com.cloudyte.app.ui.components.ConfirmDialog
 import com.cloudyte.app.ui.components.GroupedList
 import com.cloudyte.app.ui.components.GroupedListItem
 import com.cloudyte.app.ui.components.LocalBottomBarInset
+import com.cloudyte.app.ui.components.ServerUrlConfigDialog
 import com.cloudyte.app.ui.components.SettingsClickRow
 import com.cloudyte.app.ui.components.SettingsSectionTitle
 import com.cloudyte.app.ui.components.SettingsSliderRow
@@ -141,7 +144,10 @@ fun SettingsSectionScreen(
     var showConfirmResetSettings by remember { mutableStateOf(false) }
     var showSyncLogsDialog by remember { mutableStateOf(false) }
     var showActiveSessionsSheet by remember { mutableStateOf(false) }
+    var showActiveSharesSheet by remember { mutableStateOf(false) }
+    var showServerUrlDialog by remember { mutableStateOf(false) }
     var activeDialogType by remember { mutableStateOf<String?>(null) }
+    val currentServerUrl by ApiClient.baseUrlFlow.collectAsState()
 
     var profile by remember { mutableStateOf<UserProfile?>(null) }
     var accounts by remember { mutableStateOf<List<Account>>(emptyList()) }
@@ -239,13 +245,10 @@ fun SettingsSectionScreen(
                             GroupedListItem(key = "server_url") {
                                 SettingsClickRow(
                                     title = stringResource(R.string.settings_server_url),
-                                    subtitle = ApiClient.API_BASE_URL,
+                                    subtitle = "$currentServerUrl · Tap to edit",
                                     icon = Icons.Outlined.Dns,
-                                    onClick = {
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("Server URL", ApiClient.API_BASE_URL))
-                                        Toast.makeText(context, context.getString(R.string.settings_server_copied), Toast.LENGTH_SHORT).show()
-                                    }
+                                    onClick = { showServerUrlDialog = true },
+                                    modifier = Modifier.testTag("settings_server_url_row")
                                 )
                             }
                         )
@@ -606,6 +609,15 @@ fun SettingsSectionScreen(
                                 onClick = { showActiveSessionsSheet = true },
                                 modifier = Modifier.testTag("settings_active_sessions_security_row")
                             )
+                        },
+                        GroupedListItem(key = "active_shares_security") {
+                            SettingsClickRow(
+                                title = "Active Share Links",
+                                subtitle = "View, copy, or revoke public file links",
+                                icon = Icons.Outlined.Link,
+                                onClick = { showActiveSharesSheet = true },
+                                modifier = Modifier.testTag("settings_active_shares_security_row")
+                            )
                         }
                     )
                     GroupedList(items = secItems)
@@ -936,6 +948,28 @@ fun SettingsSectionScreen(
             onDismiss = { showActiveSessionsSheet = false },
             onFeedback = { msg ->
                 scope.launch { snackbarHostState.showSnackbar(msg) }
+            }
+        )
+    }
+
+    if (showActiveSharesSheet) {
+        ActiveSharesBottomSheet(
+            onDismiss = { showActiveSharesSheet = false },
+            onFeedback = { msg ->
+                scope.launch { snackbarHostState.showSnackbar(msg) }
+            }
+        )
+    }
+
+    if (showServerUrlDialog) {
+        ServerUrlConfigDialog(
+            currentUrl = currentServerUrl,
+            onDismiss = { showServerUrlDialog = false },
+            onSaved = { newUrl ->
+                showServerUrlDialog = false
+                scope.launch {
+                    snackbarHostState.showSnackbar("Server URL updated to $newUrl")
+                }
             }
         )
     }
